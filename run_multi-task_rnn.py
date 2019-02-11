@@ -110,7 +110,9 @@ def conlleval(p, g, w, filename):
 def get_perf(filename):
     ''' run conlleval.pl perl script to obtain
     precision/recall and F1 score '''
-    _conlleval = os.path.dirname(os.path.realpath(__file__)) + '/conlleval.pl'
+    #_conlleval = os.path.dirname(os.path.realpath(__file__)) + '\\conlleval.pl'
+    _conlleval = os.getcwd() + '\\conlleval.pl'
+    print("_conlleval:", _conlleval)
     os.chmod(_conlleval, stat.S_IRWXU)  # give the execute permissions
 
     proc = subprocess.Popen(["perl",
@@ -118,7 +120,7 @@ def get_perf(filename):
                             stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE,
                             encoding='utf8')
-
+    print('filename:', filename)
     stdout, _ = proc.communicate(''.join(open(filename).readlines()))
     for line in stdout.split('\n'):
         if 'accuracy' in line:
@@ -189,8 +191,7 @@ def create_model(session,
           label_vocab_size, 
           _buckets,
           FLAGS.word_embedding_size, 
-          FLAGS.size, 
-          FLAGS.num_layers, 
+          FLAGS.size, FLAGS.num_layers, 
           FLAGS.max_gradient_norm, 
           FLAGS.batch_size,
           dropout_keep_prob=FLAGS.dropout_keep_prob, 
@@ -241,12 +242,12 @@ def train():
   in_seq_test, out_seq_test, label_test = date_set[2]
   vocab_path, tag_vocab_path, label_vocab_path = date_set[3]
      
-  result_dir = FLAGS.train_dir + '/test_results'
+  result_dir = FLAGS.train_dir + '\\test_results'
   if not os.path.isdir(result_dir):
       os.makedirs(result_dir)
 
-  current_taging_valid_out_file = result_dir + '/tagging.valid.hyp.txt'
-  current_taging_test_out_file = result_dir + '/tagging.test.hyp.txt'
+  current_taging_valid_out_file = result_dir + '\\tagging.valid.hyp.txt'
+  current_taging_test_out_file = result_dir + '\\tagging.test.hyp.txt'
 
   vocab, rev_vocab = data_utils.initialize_vocab(vocab_path)
   tag_vocab, rev_tag_vocab = data_utils.initialize_vocab(tag_vocab_path)
@@ -257,7 +258,8 @@ def train():
       #device_count = {'gpu': 2}
   )
     
-  with tf.Session(config=config) as sess:
+  #with tf.Session(config=config) as sess:
+  with tf.Session() as sess:
     # Create model.
     print("Max sequence length: %d." % _buckets[0][0])
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
@@ -427,20 +429,23 @@ def train():
             and valid_tagging_result['f1'] > best_valid_score:
           best_valid_score = valid_tagging_result['f1']
           # save the best output file
-          subprocess.call(['mv', 
+          print("current_taging_valid_out_file:", current_taging_valid_out_file)
+          subprocess.call(['move', 
                            current_taging_valid_out_file, 
                            current_taging_valid_out_file + '.best_f1_%.2f' \
-                           % best_valid_score])
+                           % best_valid_score],
+                          shell=True)
         # test, run test after each validation for development purpose.
         test_accuracy, test_tagging_result = run_valid_test(test_set, 'Test')        
         if task['tagging'] == 1 \
             and test_tagging_result['f1'] > best_test_score:
           best_test_score = test_tagging_result['f1']
           # save the best output file
-          subprocess.call(['mv', 
+          subprocess.call(['move', 
                            current_taging_test_out_file, 
                            current_taging_test_out_file + '.best_f1_%.2f' \
-                           % best_test_score])
+                           % best_test_score],
+                           shell=True)
           
 def main(_):
     train()
