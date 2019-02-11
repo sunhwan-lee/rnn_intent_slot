@@ -110,6 +110,7 @@ out_vocab_*
 data/ATIS_samples/test/*.ids*
 data/ATIS_samples/train/*.ids*
 data/ATIS_samples/valid/*.ids*
+data/ATIS
 
 # model output
 model_tmp/
