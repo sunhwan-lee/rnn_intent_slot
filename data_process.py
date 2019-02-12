@@ -16,11 +16,21 @@ def prepare_dataset(inputfile, mode):
   input_seq_list = []
   output_seq_list = []
   intent_list = []
+  intent_cnt = {}
   with gfile.GFile(inputfile, mode="r") as data_file:
     for line in data_file:
       input_seq = line[line.find('BOS')+4:line.find('EOS')].strip()
-      output_seq = line[line.find('EOS')+4:line.rfind('atis_')].strip()
-      intent = line[line.rfind('atis_')+5:].strip()
+      output_seq = line[line.find('EOS')+4:line.find('atis_')].strip()
+      # make sure that slot starts with O
+      assert output_seq.startswith('O'), print("output_seq: %s" % output_seq)
+      # exclude the first slot lable, O
+      output_seq = output_seq[output_seq.find('O')+1:].strip()
+      # make sure that input_seq and output_seq has the same number of words
+      assert len(input_seq.split(' ')) == len(output_seq.split(' ')), \
+      print("input: %s (%d), output:%s (%d)" % (input_seq, len(input_seq.split(' ')), \
+                                                output_seq, len(output_seq.split(' '))))
+      intent = line[line.find('atis_'):].strip()
+      
       input_seq_list.append(input_seq)
       output_seq_list.append(output_seq)
       intent_list.append(intent)
