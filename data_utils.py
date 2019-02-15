@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sat Feb 27 09:33:32 2016
+Created on Thu Feb 14 2019
 
-@author: Bing Liu (liubing@cmu.edu)
+@author: Sunhwan Lee (shlee@us.ibm.com)
 
 Prepare data for multi-task RNN model.
 """
@@ -13,6 +13,7 @@ from __future__ import print_function
 
 import os
 import re
+import string
 
 from tensorflow.python.platform import gfile
 
@@ -183,7 +184,35 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
                                             normalize_digits)
           tokens_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
 
+def user_input_to_token_ids(user_input, vocabulary_path,
+                            tokenizer=None, normalize_digits=True, use_padding=True):
+  """Tokenize user input and turn into token-ids using given vocabulary file.
 
+  This function loads a user input in a chatbot, calls the above
+  sentence_to_token_ids, and returns the result of token-ids format.
+
+  Args:
+    user_input: user's raw input to chatbot.
+    vocabulary_path: path to the vocabulary file.
+    tokenizer: a function to use to tokenize each sentence;
+      if None, basic_tokenizer will be used.
+    normalize_digits: Boolean; if true, all digits are replaced by 0s.
+  """
+  vocab, _ = initialize_vocab(vocabulary_path)
+
+  # convert to lower case and remove ending period
+  user_input_lower = user_input.lower()
+  user_input_lower_wo_punc = user_input_lower[:-1] \
+                              if user_input_lower[-1] in string.punctuation \
+                              else user_input_lower
+  if use_padding:
+    UNK_ID = UNK_ID_dict['with_padding']
+  else:
+    UNK_ID = UNK_ID_dict['no_padding']
+  token_ids = sentence_to_token_ids(user_input_lower_wo_punc, vocab, 
+                                    UNK_ID, tokenizer, normalize_digits)
+  
+  return user_input, user_input_lower_wo_punc, token_ids
 
 def create_label_vocab(vocabulary_path, data_path):
   if not gfile.Exists(vocabulary_path):

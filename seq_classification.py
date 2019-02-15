@@ -111,24 +111,27 @@ def generate_single_output(encoder_state, attention_states, sequence_length,
     with tf.variable_scope(tf.get_variable_scope(),
                                        reuse=None):
       single_outputs = attention_single_output_decoder(encoder_state, 
-                                                      attention_states, 
-                                                      output_size=num_classes,
-                                                      num_heads=1,
-                                                      sequence_length=sequence_length,
-                                                      use_attention=use_attention)
+                                                       attention_states, 
+                                                       output_size=num_classes,
+                                                       num_heads=1,
+                                                       sequence_length=sequence_length,
+                                                       use_attention=use_attention)
       _, _, _, bucket_outputs = single_outputs
-        
-      if softmax_loss_function is None:
-        assert len(bucket_outputs) == len(targets) == 1
-        # We need to make target and int64-tensor and set its shape.
-        bucket_target = tf.reshape(tf.to_int64(targets[0]), [-1])
-        crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            logits=bucket_outputs[0], labels=bucket_target)
+      
+      if len(targets):
+        if softmax_loss_function is None:
+          assert len(bucket_outputs) == len(targets) == 1
+          # We need to make target and int64-tensor and set its shape.
+          bucket_target = tf.reshape(tf.to_int64(targets[0]), [-1])
+          crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
+              logits=bucket_outputs[0], labels=bucket_target)
+        else:
+          assert len(bucket_outputs) == len(targets) == 1
+          crossent = softmax_loss_function(bucket_outputs[0], targets[0])
+         
+        batch_size = tf.shape(targets[0])[0]
+        loss = tf.reduce_sum(crossent) / tf.cast(batch_size, tf.float32)
       else:
-        assert len(bucket_outputs) == len(targets) == 1
-        crossent = softmax_loss_function(bucket_outputs[0], targets[0])
-       
-      batch_size = tf.shape(targets[0])[0]
-      loss = tf.reduce_sum(crossent) / tf.cast(batch_size, tf.float32)
+        loss = None
 
   return bucket_outputs, loss

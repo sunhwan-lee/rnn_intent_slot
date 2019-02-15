@@ -187,17 +187,17 @@ def attention_RNN(encoder_outputs,
   
 def generate_sequence_output(num_encoder_symbols,
                              encoder_outputs, 
-                             encoder_state, 
-                             targets,
-                             sequence_length, 
+                             encoder_state,                              
+                             sequence_length,                              
                              num_decoder_symbols, 
+                             targets,
                              weights,
                              buckets, 
                              softmax_loss_function=None,
                              per_example_loss=False, 
                              name=None, 
                              use_attention=False):
-  if len(targets) < buckets[-1][1]:
+  if len(targets) and len(targets) < buckets[-1][1]:
     raise ValueError("Length of targets (%d) must be at least that of last"
                      "bucket (%d)." % (len(targets), buckets[-1][1]))
 
@@ -209,18 +209,22 @@ def generate_sequence_output(num_encoder_symbols,
                                                 num_decoder_symbols,
                                                 sequence_length,
                                                 use_attention=use_attention)
-      if per_example_loss is None:
-        assert len(logits) == len(targets)
-        # We need to make target and int64-tensor and set its shape.
-        bucket_target = [tf.reshape(tf.to_int64(x), [-1]) for x in targets]
-        crossent = sequence_loss_by_example(
-              logits, bucket_target, weights,
-              softmax_loss_function=softmax_loss_function)
+      
+      if len(targets):        
+        if per_example_loss is None:
+          assert len(logits) == len(targets)
+          # We need to make target and int64-tensor and set its shape.
+          bucket_target = [tf.reshape(tf.to_int64(x), [-1]) for x in targets]
+          crossent = sequence_loss_by_example(
+                logits, bucket_target, weights,
+                softmax_loss_function=softmax_loss_function)
+        else:
+          assert len(logits) == len(targets)
+          bucket_target = [tf.reshape(tf.to_int64(x), [-1]) for x in targets]
+          crossent = sequence_loss(
+                logits, bucket_target, weights,
+                softmax_loss_function=softmax_loss_function)
       else:
-        assert len(logits) == len(targets)
-        bucket_target = [tf.reshape(tf.to_int64(x), [-1]) for x in targets]
-        crossent = sequence_loss(
-              logits, bucket_target, weights,
-              softmax_loss_function=softmax_loss_function)
+        crossent = None
 
   return logits, crossent

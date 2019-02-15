@@ -50,7 +50,8 @@ class MultiTaskModel(object):
                num_samples=1024, 
                use_attention=False, 
                task=None, 
-               forward_only=False):
+               forward_only=False,
+               pred_only=False):
     self.source_vocab_size = source_vocab_size
     self.tag_vocab_size = tag_vocab_size
     self.label_vocab_size = label_vocab_size
@@ -61,6 +62,7 @@ class MultiTaskModel(object):
     self.batch_size = batch_size
     self.bidirectional_rnn = bidirectional_rnn
     self.global_step = tf.Variable(0, trainable=False)
+    self.pred_only = pred_only
     
     # If we use sampled softmax, we need an output projection.
     softmax_loss_function = None
@@ -92,27 +94,26 @@ class MultiTaskModel(object):
     for i in xrange(buckets[-1][0]):
       self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
                                                 name="encoder{0}".format(i)))
-    for i in xrange(buckets[-1][1]):
-      self.tags.append(tf.placeholder(tf.float32, shape=[None], 
-                                      name="tag{0}".format(i)))
-      self.tag_weights.append(tf.placeholder(tf.float32, shape=[None],
-                                                name="weight{0}".format(i)))
-    self.labels.append(tf.placeholder(tf.float32, shape=[None], name="label"))
+    
+    if not self.pred_only:
+      for i in xrange(buckets[-1][1]):
+        self.tags.append(tf.placeholder(tf.float32, shape=[None], 
+                                        name="tag{0}".format(i)))
+        self.tag_weights.append(tf.placeholder(tf.float32, shape=[None],
+                                                  name="weight{0}".format(i)))
+      self.labels.append(tf.placeholder(tf.float32, shape=[None], name="label"))
 
     base_rnn_output = self.generate_rnn_output()
     encoder_outputs, encoder_state, attention_states = base_rnn_output
-    print(len(encoder_outputs), encoder_outputs[0].get_shape())
-    print(encoder_state.get_shape())
-    print(attention_states.get_shape())
     
     if task['tagging'] == 1:
        seq_labeling_outputs = seq_labeling.generate_sequence_output(
                                    self.source_vocab_size,
                                    encoder_outputs, 
-                                   encoder_state, 
-                                   self.tags, 
-                                   self.sequence_length, 
+                                   encoder_state,                                    
+                                   self.sequence_length,                                    
                                    self.tag_vocab_size, 
+                                   self.tags,
                                    self.tag_weights,
                                    buckets, 
                                    softmax_loss_function=softmax_loss_function, 
@@ -206,9 +207,48 @@ class MultiTaskModel(object):
         attention_states = tf.concat(top_states, 1)
       return encoder_outputs, encoder_state, attention_states
   
+  def joint_pred(self, session, encoder_inputs, batch_sequence_length,
+                 bucket_id):
+    """Run a prediction step of the joint model feeding the given inputs.
+
+    Args:
+      session: tensorflow session to use.
+      encoder_inputs: list of numpy int vectors to feed as encoder inputs.
+      bucket_id: which bucket of the model to use.
+      batch_sequence_length: batch_sequence_length
+      bucket_id: which bucket of the model to use.
+
+    Returns:
+      A triple consisting of output tags, and output class label.
+
+    Raises:
+      ValueError: if length of encoder_inputs disagrees with bucket size 
+                  for the specified bucket_id.
+    """
+    # Check if the sizes match.
+    encoder_size, tag_size = self.buckets[bucket_id]
+    if len(encoder_inputs) != encoder_size:
+      raise ValueError("Encoder length must be equal to the one in bucket,"
+                       " %d != %d." % (len(encoder_inputs), encoder_size))
+    
+    input_feed = {}
+    input_feed[self.sequence_length.name] = batch_sequence_length
+    for l in xrange(encoder_size):
+      input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
+
+    # Output feed
+    output_feed = []
+    for i in range(tag_size):
+      output_feed.append(self.tagging_output[i])
+    output_feed.append(self.classification_output[0])
+
+    outputs = session.run(output_feed, input_feed)
+    
+    return outputs[:tag_size], outputs[-1]
+
   def joint_step(self, session, encoder_inputs, tags, tag_weights, 
                  labels, batch_sequence_length,
-           bucket_id, forward_only):
+                 bucket_id, forward_only):
     """Run a step of the joint model feeding the given inputs.
 
     Args:
@@ -450,6 +490,49 @@ class MultiTaskModel(object):
     batch_sequence_length = np.array(batch_sequence_length_list, dtype=np.int32)
     return (batch_encoder_inputs, batch_decoder_inputs, batch_weights, 
             batch_sequence_length, batch_labels)
+
+
+  def get_batch_format(self, data, bucket_id):
+    """Create a batch format of a single data with bucket id.
+
+    To feed data in step(..) it must be a list of batch-major vectors, while
+    data here contains single length-major cases. So the main logic of this
+    function is to re-index data cases to be in the proper format for feeding.
+
+    Args:
+      data: list of token ids.
+      bucket_id: integer, which bucket to get the batch for.
+
+    Returns:
+      The triple (encoder_inputs, sequence length) for
+      the constructed batch that has the proper format to call step(...) later.
+    """
+    encoder_size, _ = self.buckets[bucket_id]
+    encoder_inputs = []
+
+    # Get a random batch of encoder and decoder inputs from data,
+    # pad them if needed, reverse encoder inputs and add GO to decoder.
+    batch_sequence_length_list= list()
+    encoder_input = data
+    batch_sequence_length_list.append(len(encoder_input))
+
+    # Encoder inputs are padded and then reversed.
+    encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
+    #encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
+    encoder_inputs.append(list(encoder_input + encoder_pad))
+
+    # Now we create batch-major vectors from the data selected above.
+    batch_encoder_inputs = []
+    
+    # Batch encoder inputs are just re-indexed encoder_inputs.
+    for length_idx in xrange(encoder_size):
+      batch_encoder_inputs.append(
+          np.array([encoder_inputs[batch_idx][length_idx]
+                    for batch_idx in xrange(1)], dtype=np.int32))
+                
+    batch_sequence_length = np.array(batch_sequence_length_list, dtype=np.int32)
+    
+    return (batch_encoder_inputs, batch_sequence_length)
 
 
   def get_one(self, data, bucket_id, sample_id):
