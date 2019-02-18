@@ -5,10 +5,9 @@ Created on Thu Feb 14 2019
 @author: Sunhwan Lee (shlee@us.ibm.com)
 """
 
-import math
 import os
 import sys
-import time
+from pprint import pprint
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -16,9 +15,6 @@ import tensorflow as tf
 
 import data_utils
 import multi_task_model
-
-import subprocess
-import stat
 
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0,
                           "Clip gradients to this norm.")
@@ -62,51 +58,6 @@ elif FLAGS.task == 'joint':
     task['joint'] = 1
 
 _buckets = [(FLAGS.max_sequence_length, FLAGS.max_sequence_length)]
-
-def read_data(source_path, target_path, label_path, max_size=None):
-  """Read data from source and target files and put into buckets.
-
-  Args:
-    source_path: path to the files with token-ids for the word sequence.
-    target_path: path to the file with token-ids for the tag sequence;
-      it must be aligned with the source file: n-th line contains the desired
-      output for n-th line from the source_path.
-    label_path: path to the file with token-ids for the intent label
-    max_size: maximum number of lines to read, all other will be ignored;
-      if 0 or None, data files will be read completely (no limit).
-
-  Returns:
-    data_set: a list of length len(_buckets); data_set[n] contains a list of
-      (source, target, label) tuple read from the provided data files that fit
-      into the n-th bucket, i.e., such that len(source) < _buckets[n][0] and
-      len(target) < _buckets[n][1];source, target, label are lists of token-ids
-  """
-  data_set = [[] for _ in _buckets]
-  with tf.gfile.GFile(source_path, mode="r") as source_file:
-    with tf.gfile.GFile(target_path, mode="r") as target_file:
-      with tf.gfile.GFile(label_path, mode="r") as label_file:
-        source = source_file.readline()
-        target = target_file.readline()
-        label = label_file.readline()
-        counter = 0
-        while source and target and label and (not max_size \
-                                               or counter < max_size):
-          counter += 1
-          if counter % 100000 == 0:
-            print("  reading data line %d" % counter)
-            sys.stdout.flush()
-          source_ids = [int(x) for x in source.split()]
-          target_ids = [int(x) for x in target.split()]
-          label_ids = [int(x) for x in label.split()]
-#          target_ids.append(data_utils.EOS_ID)
-          for bucket_id, (source_size, target_size) in enumerate(_buckets):
-            if len(source_ids) < source_size and len(target_ids) < target_size:
-              data_set[bucket_id].append([source_ids, target_ids, label_ids])
-              break
-          source = source_file.readline()
-          target = target_file.readline()
-          label = label_file.readline()
-  return data_set # 3 outputs in each unit: source_ids, target_ids, label_ids 
 
 def create_model(session, 
                  source_vocab_size, 
@@ -171,6 +122,31 @@ def _get_user_input():
   print("> ", end="")
   sys.stdout.flush()
   return sys.stdin.readline()
+
+def _extract_entity(tagging, user_input_to_model):
+
+  entity_dict = {}
+  for idx, tag in enumerate(tagging):
+    if tag.startswith("B-"):
+      entity_name = tag[2:]
+      entity_value = user_input_to_model[idx]
+      if entity_name in entity_dict:
+        entity_dict[entity_name].append(entity_value)
+      else:
+        entity_dict[entity_name] = [entity_value]
+      current_entity_name = entity_name
+    elif tag.startswith("I-"):
+      entity_name = tag[2:]
+      entity_value = user_input_to_model[idx]
+      if entity_name == current_entity_name:
+        entity_dict[entity_name][-1] += (" " + entity_value)
+      else:
+        print("Predicted tag %s must be followed by B-%s tag" % (tag, entity_name))
+        entity_dict[entity_name].append(entity_value)
+    else:
+      current_entity_name = None
+
+  return entity_dict
 
 def chatbot():
 
@@ -264,16 +240,20 @@ def chatbot():
         pred_labels = np.argsort(class_prob)[-3:]
         intent_preds = [rev_label_vocab[l] for l in pred_labels]
         print("Top 3 predicted intents:")
-        for idx in pred_labels:
+        for idx in reversed(pred_labels):
           print("%s (%.4f)" % (rev_label_vocab[idx], class_prob[idx]))
 
       if task['tagging'] == 1:
         tag_pred = [rev_tag_vocab[np.argmax(x)] for x in \
                       tagging_logits[:sequence_length[0]]]
         print("predicted tag:", tag_pred)
+        entity_dict = _extract_entity(tag_pred, user_input_to_model.split(" "))
+        print("extraged entity:")
+        pprint(entity_dict)
         print("\n")
-          
+
 def main(_):
+
   chatbot()
 
 if __name__ == "__main__":
