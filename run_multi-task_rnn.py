@@ -24,6 +24,12 @@ import multi_task_model
 import subprocess
 import stat
 
+'''
+python run_multi-task_rnn.py --data_dir data/ATIS/processed_test \
+      --train_dir model_tmp\
+      --max_sequence_length 50 \
+      --task joint
+'''
 
 #tf.app.flags.DEFINE_float("learning_rate", 0.1, "Learning rate.")
 #tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.9,
@@ -443,7 +449,21 @@ def train():
                            % best_test_score])
           
 def main(_):
-    train()
+  print ('Applying Parameters:')
+  for k,v in FLAGS.__dict__['__flags'].items():
+    print ('%s: %s' % (k, str(v)))
+  print("Preparing data in %s" % FLAGS.data_dir)
+  vocab_path = ''
+  tag_vocab_path = ''
+  label_vocab_path = ''
+  date_set = data_utils.prepare_multi_task_data(
+    FLAGS.data_dir, FLAGS.in_vocab_size, FLAGS.out_vocab_size)
+  in_seq_train, out_seq_train, label_train = date_set[0]
+  in_seq_dev, out_seq_dev, label_dev = date_set[1]
+  in_seq_test, out_seq_test, label_test = date_set[2]
+  vocab_path, tag_vocab_path, label_vocab_path = date_set[3]
+
+  #train()
 
 if __name__ == "__main__":
   tf.app.run()
