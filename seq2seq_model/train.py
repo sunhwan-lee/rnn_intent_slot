@@ -1,20 +1,10 @@
-# Copyright 2017 Google Inc. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-"""For training NMT models."""
-from __future__ import print_function
+"""
+Created on Feb 22nd 2019
 
+@author: Sunhwan Lee
+
+For training Joint Slot Filling and Intent Detection model models.
+"""
 import math
 import os
 import random
@@ -24,19 +14,10 @@ import tensorflow as tf
 
 import attention_model
 import inference
-import model as nmt_model
+import model as base_model
 import model_helper
 import utils
 import nmt_utils
-"""
-from . import attention_model
-from . import gnmt_model
-from . import inference
-from . import model as nmt_model
-from . import model_helper
-from .utils import misc_utils as utils
-from .utils import nmt_utils
-"""
 
 utils.check_tensorflow_version()
 
@@ -442,18 +423,14 @@ def before_train(loaded_train_model, train_model, train_sess, global_step,
 
 def get_model_creator(hparams):
   """Get the right model class depending on configuration."""
-  if (hparams.encoder_type == "gnmt" or
-      hparams.attention_architecture in ["gnmt", "gnmt_v2"]):
-    model_creator = gnmt_model.GNMTModel
-  elif hparams.attention and hparams.attention_architecture == "standard":
+  if hparams.attention and hparams.attention_architecture == "standard":
     model_creator = attention_model.AttentionModel
   elif not hparams.attention:
-    model_creator = nmt_model.Model
+    model_creator = base_model.Model
   else:
     raise ValueError("Unknown attention architecture %s" %
                      hparams.attention_architecture)
   return model_creator
-
 
 def train(hparams, scope=None, target_session=""):
   """Train a translation model."""
@@ -486,13 +463,11 @@ def train(hparams, scope=None, target_session=""):
   # Log and output files
   log_file = os.path.join(out_dir, "log_%d" % time.time())
   log_f = tf.gfile.GFile(log_file, mode="a")
-  utils.print_out("# log_file=%s" % log_file, log_f)
-
+  utils.print_out("\n# log_file=%s" % log_file, log_f)
+  
   # TensorFlow model
   config_proto = utils.get_config_proto(
-      log_device_placement=log_device_placement,
-      num_intra_threads=hparams.num_intra_threads,
-      num_inter_threads=hparams.num_inter_threads)
+      log_device_placement=log_device_placement)
   train_sess = tf.Session(
       target=target_session, config=config_proto, graph=train_model.graph)
   eval_sess = tf.Session(
@@ -503,7 +478,7 @@ def train(hparams, scope=None, target_session=""):
   with train_model.graph.as_default():
     loaded_train_model, global_step = model_helper.create_or_load_model(
         train_model.model, model_dir, train_sess, "train")
-
+  
   # Summary writer
   summary_writer = tf.summary.FileWriter(
       os.path.join(out_dir, summary_name), train_model.graph)
@@ -518,7 +493,7 @@ def train(hparams, scope=None, target_session=""):
   last_stats_step = global_step
   last_eval_step = global_step
   last_external_eval_step = global_step
-
+  
   # This is the training loop.
   stats, info, start_train_time = before_train(
       loaded_train_model, train_model, train_sess, global_step, hparams, log_f)

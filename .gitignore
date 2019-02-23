@@ -119,3 +119,5 @@ seq2seq_model/data/ATIS
 
 # model output
 model_tmp/
+output
+*tfevents*

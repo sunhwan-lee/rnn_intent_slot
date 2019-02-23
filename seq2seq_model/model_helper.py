@@ -77,8 +77,8 @@ class TrainModel(
 
 
 def create_train_model(
-    model_creator, hparams, scope=None, num_workers=1, jobid=0,
-    extra_args=None):
+  model_creator, hparams, scope=None, num_workers=1, jobid=0,
+  extra_args=None):
   """Create train graph, model, and iterator."""
   src_file = "%s.%s" % (hparams.train_prefix, hparams.src)
   tgt_file = "%s.%s" % (hparams.train_prefix, hparams.tgt)
@@ -109,8 +109,7 @@ def create_train_model(
         tgt_max_len=hparams.tgt_max_len,
         skip_count=skip_count_placeholder,
         num_shards=num_workers,
-        shard_index=jobid,
-        use_char_encode=hparams.use_char_encode)
+        shard_index=jobid)
 
     # Note: One can set model_device_fn to
     # `tf.train.replica_device_setter(ps_tasks)` for distributed training.
@@ -167,8 +166,7 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
         random_seed=hparams.random_seed,
         num_buckets=hparams.num_buckets,
         src_max_len=hparams.src_max_len_infer,
-        tgt_max_len=hparams.tgt_max_len_infer,
-        use_char_encode=hparams.use_char_encode)
+        tgt_max_len=hparams.tgt_max_len_infer)
     model = model_creator(
         hparams,
         iterator=iterator,
@@ -215,8 +213,7 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
         src_vocab_table,
         batch_size=batch_size_placeholder,
         eos=hparams.eos,
-        src_max_len=hparams.src_max_len_infer,
-        use_char_encode=hparams.use_char_encode)
+        src_max_len=hparams.src_max_len_infer)
     model = model_creator(
         hparams,
         iterator=iterator,
@@ -293,13 +290,10 @@ def create_emb_for_encoder_and_decoder(share_vocab,
                                        src_embed_size,
                                        tgt_embed_size,
                                        dtype=tf.float32,
-                                       num_enc_partitions=0,
-                                       num_dec_partitions=0,
                                        src_vocab_file=None,
                                        tgt_vocab_file=None,
                                        src_embed_file=None,
                                        tgt_embed_file=None,
-                                       use_char_encode=False,
                                        scope=None):
   """Create embedding matrix for both encoder and decoder.
 
@@ -313,10 +307,6 @@ def create_emb_for_encoder_and_decoder(share_vocab,
     tgt_embed_size: An integer. The embedding dimension for the decoder's
       embedding.
     dtype: dtype of the embedding matrix. Default to float32.
-    num_enc_partitions: number of partitions used for the encoder's embedding
-      vars.
-    num_dec_partitions: number of partitions used for the decoder's embedding
-      vars.
     scope: VariableScope for the created subgraph. Default to "embedding".
 
   Returns:
@@ -327,36 +317,8 @@ def create_emb_for_encoder_and_decoder(share_vocab,
     ValueError: if use share_vocab but source and target have different vocab
       size.
   """
-  if num_enc_partitions <= 1:
-    enc_partitioner = None
-  else:
-    # Note: num_partitions > 1 is required for distributed training due to
-    # embedding_lookup tries to colocate single partition-ed embedding variable
-    # with lookup ops. This may cause embedding variables being placed on worker
-    # jobs.
-    enc_partitioner = tf.fixed_size_partitioner(num_enc_partitions)
-
-  if num_dec_partitions <= 1:
-    dec_partitioner = None
-  else:
-    # Note: num_partitions > 1 is required for distributed training due to
-    # embedding_lookup tries to colocate single partition-ed embedding variable
-    # with lookup ops. This may cause embedding variables being placed on worker
-    # jobs.
-    dec_partitioner = tf.fixed_size_partitioner(num_dec_partitions)
-
-  if src_embed_file and enc_partitioner:
-    raise ValueError(
-        "Can't set num_enc_partitions > 1 when using pretrained encoder "
-        "embedding")
-
-  if tgt_embed_file and dec_partitioner:
-    raise ValueError(
-        "Can't set num_dec_partitions > 1 when using pretrained decdoer "
-        "embedding")
-
   with tf.variable_scope(
-      scope or "embeddings", dtype=dtype, partitioner=enc_partitioner) as scope:
+      scope or "embeddings", dtype=dtype) as scope:
     # Share embedding
     if share_vocab:
       if src_vocab_size != tgt_vocab_size:
@@ -372,15 +334,12 @@ def create_emb_for_encoder_and_decoder(share_vocab,
           src_vocab_size, src_embed_size, dtype)
       embedding_decoder = embedding_encoder
     else:
-      if not use_char_encode:
-        with tf.variable_scope("encoder", partitioner=enc_partitioner):
-          embedding_encoder = _create_or_load_embed(
-              "embedding_encoder", src_vocab_file, src_embed_file,
-              src_vocab_size, src_embed_size, dtype)
-      else:
-        embedding_encoder = None
-
-      with tf.variable_scope("decoder", partitioner=dec_partitioner):
+      with tf.variable_scope("encoder"):
+        embedding_encoder = _create_or_load_embed(
+            "embedding_encoder", src_vocab_file, src_embed_file,
+            src_vocab_size, src_embed_size, dtype)
+    
+      with tf.variable_scope("decoder"):
         embedding_decoder = _create_or_load_embed(
             "embedding_decoder", tgt_vocab_file, tgt_embed_file,
             tgt_vocab_size, tgt_embed_size, dtype)
@@ -388,8 +347,7 @@ def create_emb_for_encoder_and_decoder(share_vocab,
   return embedding_encoder, embedding_decoder
 
 
-def _single_cell(unit_type, num_units, forget_bias, dropout, mode,
-                 residual_connection=False, device_str=None, residual_fn=None):
+def _single_cell(unit_type, num_units, forget_bias, dropout, mode, device_str=None):
   """Create an instance of a single RNN cell."""
   # dropout (= 1 - keep_prob) is set to 0 during eval and infer
   dropout = dropout if mode == tf.contrib.learn.ModeKeys.TRAIN else 0.0
@@ -397,9 +355,10 @@ def _single_cell(unit_type, num_units, forget_bias, dropout, mode,
   # Cell Type
   if unit_type == "lstm":
     utils.print_out("  LSTM, forget_bias=%g" % forget_bias, new_line=False)
-    single_cell = tf.contrib.rnn.BasicLSTMCell(
-        num_units,
-        forget_bias=forget_bias)
+    single_cell = tf.nn.rnn_cell.LSTMCell(
+      num_units,
+      forget_bias=forget_bias,
+      name="basic_lstm_cell")
   elif unit_type == "gru":
     utils.print_out("  GRU", new_line=False)
     single_cell = tf.contrib.rnn.GRUCell(num_units)
@@ -423,12 +382,6 @@ def _single_cell(unit_type, num_units, forget_bias, dropout, mode,
     utils.print_out("  %s, dropout=%g " %(type(single_cell).__name__, dropout),
                     new_line=False)
 
-  # Residual
-  if residual_connection:
-    single_cell = tf.contrib.rnn.ResidualWrapper(
-        single_cell, residual_fn=residual_fn)
-    utils.print_out("  %s" % type(single_cell).__name__, new_line=False)
-
   # Device Wrapper
   if device_str:
     single_cell = tf.contrib.rnn.DeviceWrapper(single_cell, device_str)
@@ -438,9 +391,9 @@ def _single_cell(unit_type, num_units, forget_bias, dropout, mode,
   return single_cell
 
 
-def _cell_list(unit_type, num_units, num_layers, num_residual_layers,
+def _cell_list(unit_type, num_units, num_layers,
                forget_bias, dropout, mode, num_gpus, base_gpu=0,
-               single_cell_fn=None, residual_fn=None):
+               single_cell_fn=None):
   """Create a list of RNN cells."""
   if not single_cell_fn:
     single_cell_fn = _single_cell
@@ -455,9 +408,7 @@ def _cell_list(unit_type, num_units, num_layers, num_residual_layers,
         forget_bias=forget_bias,
         dropout=dropout,
         mode=mode,
-        residual_connection=(i >= num_layers - num_residual_layers),
-        device_str=get_device_str(i + base_gpu, num_gpus),
-        residual_fn=residual_fn
+        device_str=get_device_str(i + base_gpu, num_gpus)
     )
     utils.print_out("")
     cell_list.append(single_cell)
@@ -465,7 +416,7 @@ def _cell_list(unit_type, num_units, num_layers, num_residual_layers,
   return cell_list
 
 
-def create_rnn_cell(unit_type, num_units, num_layers, num_residual_layers,
+def create_rnn_cell(unit_type, num_units, num_layers,
                     forget_bias, dropout, mode, num_gpus, base_gpu=0,
                     single_cell_fn=None):
   """Create multi-layer RNN cell.
@@ -474,9 +425,6 @@ def create_rnn_cell(unit_type, num_units, num_layers, num_residual_layers,
     unit_type: string representing the unit type, i.e. "lstm".
     num_units: the depth of each unit.
     num_layers: number of cells.
-    num_residual_layers: Number of residual layers from top to bottom. For
-      example, if `num_layers=4` and `num_residual_layers=2`, the last 2 RNN
-      cells in the returned list will be wrapped with `ResidualWrapper`.
     forget_bias: the initial forget bias of the RNNCell(s).
     dropout: floating point value between 0.0 and 1.0:
       the probability of dropout.  this is ignored if `mode != TRAIN`.
@@ -494,7 +442,6 @@ def create_rnn_cell(unit_type, num_units, num_layers, num_residual_layers,
   cell_list = _cell_list(unit_type=unit_type,
                          num_units=num_units,
                          num_layers=num_layers,
-                         num_residual_layers=num_residual_layers,
                          forget_bias=forget_bias,
                          dropout=dropout,
                          mode=mode,

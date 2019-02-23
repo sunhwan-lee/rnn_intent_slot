@@ -35,7 +35,7 @@ python run_multi_task_sfid.py \
     --num_layers=2 \
     --num_units=128 \
     --dropout=0.2 \
-    --metrics=f1
+    --metrics=f1 
 """
 
 utils.check_tensorflow_version()
@@ -47,7 +47,6 @@ INFERENCE_KEYS = ["src_max_len_infer", "tgt_max_len_infer", "subword_option",
                   "length_penalty_weight", "coverage_penalty_weight",
                   "sampling_temperature", "num_translations_per_input",
                   "infer_mode"]
-
 
 def add_arguments(parser):
   """Build ArgumentParser."""
@@ -226,14 +225,6 @@ def add_arguments(parser):
                       Set to bpe or spm to activate subword desegmentation.\
                       """)
 
-  # Experimental encoding feature.
-  parser.add_argument("--use_char_encode", type="bool", default=False,
-                      help="""\
-                      Whether to split each word or bpe into character, and then
-                      generate the word-level representation from the character
-                      reprentation.
-                      """)
-
   # Misc
   parser.add_argument("--num_gpus", type=int, default=1,
                       help="Number of gpus in each worker.")
@@ -264,10 +255,6 @@ def add_arguments(parser):
                       Average the last N checkpoints for external evaluation.
                       N can be controlled by setting --num_keep_ckpts.\
                       """))
-  parser.add_argument("--language_model", type="bool", nargs="?",
-                      const=True, default=False,
-                      help="True to train a language model, ignoring encoder")
-
   # Inference
   parser.add_argument("--ckpt", type=str, default="",
                       help="Checkpoint file to load a model for inference.")
@@ -389,8 +376,7 @@ def create_hparams(flags):
       eos=flags.eos if flags.eos else vocab_utils.EOS,
       subword_option=flags.subword_option,
       check_special_token=flags.check_special_token,
-      use_char_encode=flags.use_char_encode,
-
+      
       # Misc
       forget_bias=flags.forget_bias,
       num_gpus=flags.num_gpus,
@@ -404,7 +390,6 @@ def create_hparams(flags):
       override_loaded_hparams=flags.override_loaded_hparams,
       num_keep_ckpts=flags.num_keep_ckpts,
       avg_ckpts=flags.avg_ckpts,
-      language_model=flags.language_model,
       num_intra_threads=flags.num_intra_threads,
       num_inter_threads=flags.num_inter_threads,
   )
@@ -516,11 +501,6 @@ def extend_hparams(hparams):
   _add_argument(hparams, "tgt_vocab_size", tgt_vocab_size)
   _add_argument(hparams, "src_vocab_file", src_vocab_file)
   _add_argument(hparams, "tgt_vocab_file", tgt_vocab_file)
-
-  # Num embedding partitions
-  num_embeddings_partitions = getattr(hparams, "num_embeddings_partitions", 0)
-  _add_argument(hparams, "num_enc_emb_partitions", num_embeddings_partitions)
-  _add_argument(hparams, "num_dec_emb_partitions", num_embeddings_partitions)
 
   # Pretrained Embeddings
   _add_argument(hparams, "src_embed_file", "")
@@ -663,8 +643,7 @@ def run_main(flags, default_hparams, train_fn, inference_fn, target_session=""):
     hparams = create_or_load_hparams(
         out_dir, default_hparams, flags.hparams_path,
         save_hparams=(jobid == 0))
-  assert 1==0
-
+  
   ## Train / Decode
   if flags.inference_input_file:
     # Inference output directory
@@ -699,7 +678,6 @@ def run_main(flags, default_hparams, train_fn, inference_fn, target_session=""):
   else:
     # Train
     train_fn(hparams, target_session=target_session)
-
 
 def main(unused_argv):
   default_hparams = create_hparams(FLAGS)

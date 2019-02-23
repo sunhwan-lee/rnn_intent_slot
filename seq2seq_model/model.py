@@ -1,22 +1,12 @@
-# Copyright 2017 Google Inc. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
+"""
+Created on Feb 22nd 2019
 
-"""Basic sequence-to-sequence model with dynamic RNN support."""
+@author: Sunhwan Lee
+
+Basic sequence-to-sequence model with dynamic RNN support.
+"""
 from __future__ import absolute_import
 from __future__ import division
-from __future__ import print_function
 
 import abc
 import collections
@@ -28,17 +18,10 @@ import model_helper
 import iterator_utils
 import utils
 import vocab_utils
-"""
-from . import model_helper
-from .utils import iterator_utils
-from .utils import misc_utils as utils
-from .utils import vocab_utils
-"""
 
 utils.check_tensorflow_version()
 
 __all__ = ["BaseModel", "Model"]
-
 
 class TrainOutputTuple(collections.namedtuple(
     "TrainOutputTuple", ("train_summary", "train_loss", "predict_count",
@@ -93,14 +76,9 @@ class BaseModel(object):
                                  source_vocab_table, target_vocab_table,
                                  scope, extra_args)
 
-    # Not used in general seq2seq models; when True, ignore decoder & training
-    self.extract_encoder_layers = (hasattr(hparams, "extract_encoder_layers")
-                                   and hparams.extract_encoder_layers)
-
     # Train graph
     res = self.build_graph(hparams, scope=scope)
-    if not self.extract_encoder_layers:
-      self._set_train_or_infer(res, reverse_target_vocab_table, hparams)
+    self._set_train_or_infer(res, reverse_target_vocab_table, hparams)
 
     # Saver
     self.saver = tf.train.Saver(
@@ -126,10 +104,6 @@ class BaseModel(object):
     self.num_gpus = hparams.num_gpus
     self.time_major = hparams.time_major
 
-    if hparams.use_char_encode:
-      assert (not self.time_major), ("Can't use time major for"
-                                     " char-level inputs.")
-
     self.dtype = tf.float32
     self.num_sampled_softmax = hparams.num_sampled_softmax
 
@@ -147,14 +121,6 @@ class BaseModel(object):
     assert self.num_encoder_layers
     assert self.num_decoder_layers
 
-    # Set num residual layers
-    if hasattr(hparams, "num_residual_layers"):  # compatible common_test_utils
-      self.num_encoder_residual_layers = hparams.num_residual_layers
-      self.num_decoder_residual_layers = hparams.num_residual_layers
-    else:
-      self.num_encoder_residual_layers = hparams.num_encoder_residual_layers
-      self.num_decoder_residual_layers = hparams.num_decoder_residual_layers
-
     # Batch size
     self.batch_size = tf.size(self.iterator.source_sequence_length)
 
@@ -168,10 +134,7 @@ class BaseModel(object):
     tf.get_variable_scope().set_initializer(initializer)
 
     # Embeddings
-    if extra_args and extra_args.encoder_emb_lookup_fn:
-      self.encoder_emb_lookup_fn = extra_args.encoder_emb_lookup_fn
-    else:
-      self.encoder_emb_lookup_fn = tf.nn.embedding_lookup
+    self.encoder_emb_lookup_fn = tf.nn.embedding_lookup
     self.init_embeddings(hparams, scope)
 
   def _set_train_or_infer(self, res, reverse_target_vocab_table, hparams):
@@ -313,13 +276,10 @@ class BaseModel(object):
             tgt_vocab_size=self.tgt_vocab_size,
             src_embed_size=self.num_units,
             tgt_embed_size=self.num_units,
-            num_enc_partitions=hparams.num_enc_emb_partitions,
-            num_dec_partitions=hparams.num_dec_emb_partitions,
             src_vocab_file=hparams.src_vocab_file,
             tgt_vocab_file=hparams.tgt_vocab_file,
             src_embed_file=hparams.src_embed_file,
             tgt_embed_file=hparams.tgt_embed_file,
-            use_char_encode=hparams.use_char_encode,
             scope=scope,))
 
   def _get_train_summary(self):
@@ -372,27 +332,17 @@ class BaseModel(object):
         attention_option is not (luong | scaled_luong |
         bahdanau | normed_bahdanau).
     """
-    utils.print_out("# Creating %s graph ..." % self.mode)
+    utils.print_out("\n# Creating %s graph ..." % self.mode)
 
     # Projection
-    if not self.extract_encoder_layers:
-      with tf.variable_scope(scope or "build_network"):
-        with tf.variable_scope("decoder/output_projection"):
-          self.output_layer = tf.layers.Dense(
-              self.tgt_vocab_size, use_bias=False, name="output_projection")
+    with tf.variable_scope(scope or "build_network"):
+      with tf.variable_scope("decoder/output_projection"):
+        self.output_layer = tf.layers.Dense(
+            self.tgt_vocab_size, use_bias=False, name="output_projection")
 
     with tf.variable_scope(scope or "dynamic_seq2seq", dtype=self.dtype):
       # Encoder
-      if hparams.language_model:  # no encoder for language modeling
-        utils.print_out("  language modeling: no encoder")
-        self.encoder_outputs = None
-        encoder_state = None
-      else:
-        self.encoder_outputs, encoder_state = self._build_encoder(hparams)
-
-      # Skip decoder if extracting only encoder layers
-      if self.extract_encoder_layers:
-        return
+      self.encoder_outputs, encoder_state = self._build_encoder(hparams)
 
       ## Decoder
       logits, decoder_cell_outputs, sample_id, final_context_state = (
@@ -422,15 +372,13 @@ class BaseModel(object):
     """
     pass
 
-  def _build_encoder_cell(self, hparams, num_layers, num_residual_layers,
-                          base_gpu=0):
+  def _build_encoder_cell(self, hparams, num_layers, base_gpu=0):
     """Build a multi-layer RNN cell that can be used by encoder."""
 
     return model_helper.create_rnn_cell(
         unit_type=hparams.unit_type,
         num_units=self.num_units,
         num_layers=num_layers,
-        num_residual_layers=num_residual_layers,
         forget_bias=hparams.forget_bias,
         dropout=hparams.dropout,
         num_gpus=hparams.num_gpus,
@@ -746,8 +694,7 @@ class Model(BaseModel):
       ValueError: if encoder_type is neither "uni" nor "bi".
     """
     num_layers = self.num_encoder_layers
-    num_residual_layers = self.num_encoder_residual_layers
-
+    
     if self.time_major:
       sequence = tf.transpose(sequence)
 
@@ -759,10 +706,8 @@ class Model(BaseModel):
 
       # Encoder_outputs: [max_time, batch_size, num_units]
       if hparams.encoder_type == "uni":
-        utils.print_out("  num_layers = %d, num_residual_layers=%d" %
-                        (num_layers, num_residual_layers))
-        cell = self._build_encoder_cell(hparams, num_layers,
-                                        num_residual_layers)
+        utils.print_out("  num_layers = %d" % num_layers)
+        cell = self._build_encoder_cell(hparams, num_layers)
 
         encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
             cell,
@@ -773,9 +718,7 @@ class Model(BaseModel):
             swap_memory=True)
       elif hparams.encoder_type == "bi":
         num_bi_layers = int(num_layers / 2)
-        num_bi_residual_layers = int(num_residual_layers / 2)
-        utils.print_out("  num_bi_layers = %d, num_bi_residual_layers=%d" %
-                        (num_bi_layers, num_bi_residual_layers))
+        utils.print_out("  num_bi_layers = %d" % num_bi_layers)
 
         encoder_outputs, bi_encoder_state = (
             self._build_bidirectional_rnn(
@@ -783,8 +726,7 @@ class Model(BaseModel):
                 sequence_length=sequence_length,
                 dtype=dtype,
                 hparams=hparams,
-                num_bi_layers=num_bi_layers,
-                num_bi_residual_layers=num_bi_residual_layers))
+                num_bi_layers=num_bi_layers))
 
         if num_bi_layers == 1:
           encoder_state = bi_encoder_state
@@ -812,14 +754,10 @@ class Model(BaseModel):
   def _build_bidirectional_rnn(self, inputs, sequence_length,
                                dtype, hparams,
                                num_bi_layers,
-                               num_bi_residual_layers,
                                base_gpu=0):
     """Create and call biddirectional RNN cells.
 
     Args:
-      num_residual_layers: Number of residual layers from top to bottom. For
-        example, if `num_bi_layers=4` and `num_residual_layers=2`, the last 2 RNN
-        layers in each RNN cell will be wrapped with `ResidualWrapper`.
       base_gpu: The gpu device id to use for the first forward RNN layer. The
         i-th forward RNN layer will use `(base_gpu + i) % num_gpus` as its
         device id. The `base_gpu` for backward RNN cell is `(base_gpu +
@@ -832,11 +770,9 @@ class Model(BaseModel):
     # Construct forward and backward cells
     fw_cell = self._build_encoder_cell(hparams,
                                        num_bi_layers,
-                                       num_bi_residual_layers,
                                        base_gpu=base_gpu)
     bw_cell = self._build_encoder_cell(hparams,
                                        num_bi_layers,
-                                       num_bi_residual_layers,
                                        base_gpu=(base_gpu + num_bi_layers))
 
     bi_outputs, bi_state = tf.nn.bidirectional_dynamic_rnn(
@@ -861,7 +797,6 @@ class Model(BaseModel):
         unit_type=hparams.unit_type,
         num_units=self.num_units,
         num_layers=self.num_decoder_layers,
-        num_residual_layers=self.num_decoder_residual_layers,
         forget_bias=hparams.forget_bias,
         dropout=hparams.dropout,
         num_gpus=self.num_gpus,
@@ -869,12 +804,6 @@ class Model(BaseModel):
         single_cell_fn=self.single_cell_fn,
         base_gpu=base_gpu
     )
-
-    if hparams.language_model:
-      encoder_state = cell.zero_state(self.batch_size, self.dtype)
-    elif not hparams.pass_hidden_state:
-      raise ValueError("For non-attentional model, "
-                       "pass_hidden_state needs to be set to True")
 
     # For beam search, we need to replicate encoder infos beam_width times
     if (self.mode == tf.contrib.learn.ModeKeys.INFER and

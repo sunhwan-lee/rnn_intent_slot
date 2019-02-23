@@ -21,7 +21,6 @@
     "infer_mode": "greedy",
     "init_op": "uniform",
     "init_weight": 0.1,
-    "language_model": false,
     "learning_rate": 1.0,
     "length_penalty_weight": 0.0,
     "log_device_placement": false,
@@ -31,11 +30,9 @@
         "f1"
     ],
     "num_buckets": 5,
-    "num_dec_emb_partitions": 0,
     "num_decoder_layers": 2,
     "num_decoder_residual_layers": 0,
     "num_embeddings_partitions": 0,
-    "num_enc_emb_partitions": 0,
     "num_encoder_layers": 2,
     "num_encoder_residual_layers": 0,
     "num_gpus": 1,
@@ -75,7 +72,6 @@
     "time_major": true,
     "train_prefix": "data/ATIS/processed/train",
     "unit_type": "lstm",
-    "use_char_encode": false,
     "vocab_prefix": "data/ATIS/processed/vocab",
     "warmup_scheme": "t2t",
     "warmup_steps": 0
