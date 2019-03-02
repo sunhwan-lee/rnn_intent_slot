@@ -57,7 +57,7 @@ def decode_and_evaluate(name,
 
       while True:
         try:
-          nmt_outputs, _ = model.decode(sess)
+          nmt_outputs, src_seq_length, _ = model.decode(sess)
           if infer_mode != "beam_search":
             nmt_outputs = np.expand_dims(nmt_outputs, 0)
 
@@ -68,6 +68,7 @@ def decode_and_evaluate(name,
             for beam_id in range(num_translations_per_input):
               translation = get_translation(
                   nmt_outputs[beam_id],
+                  src_seq_length,
                   sent_id,
                   tgt_eos=tgt_eos,
                   subword_option=subword_option)
@@ -93,12 +94,15 @@ def decode_and_evaluate(name,
   return evaluation_scores
 
 
-def get_translation(nmt_outputs, sent_id, tgt_eos, subword_option):
+def get_translation(nmt_outputs, src_seq_length, sent_id, tgt_eos, subword_option):
   """Given batch decoding outputs, select a sentence and turn to text."""
   if tgt_eos: tgt_eos = tgt_eos.encode("utf-8")
   # Select a sentence
   output = nmt_outputs[sent_id, :].tolist()
 
+  # Make the output length same as input length
+  input_length = src_seq_length[sent_id]
+  output = output[:input_length]
   # If there is an eos symbol in outputs, cut them at that point.
   if tgt_eos and tgt_eos in output:
     output = output[:output.index(tgt_eos)]

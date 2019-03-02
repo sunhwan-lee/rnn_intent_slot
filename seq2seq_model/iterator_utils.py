@@ -101,7 +101,7 @@ def get_iterator(src_dataset,
     output_buffer_size = batch_size * 1000
 
   src_eos_id = tf.cast(src_vocab_table.lookup(tf.constant(eos)), tf.int32)
-
+  
   tgt_sos_id = tf.cast(tgt_vocab_table.lookup(tf.constant(sos)), tf.int32)
   tgt_eos_id = tf.cast(tgt_vocab_table.lookup(tf.constant(eos)), tf.int32)
 

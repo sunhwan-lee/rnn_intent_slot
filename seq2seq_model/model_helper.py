@@ -566,7 +566,7 @@ def avg_checkpoints(model_dir, num_last_checkpoints, global_step,
 
 
 def create_or_load_model(model, model_dir, session, name):
-  """Create translation model and initialize or load parameters in session."""
+  """Create model and initialize or load parameters in session."""
   latest_ckpt = tf.train.latest_checkpoint(model_dir)
   if latest_ckpt:
     model = load_model(model, latest_ckpt, session, name)

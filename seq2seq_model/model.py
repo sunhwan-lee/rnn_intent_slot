@@ -39,7 +39,7 @@ class EvalOutputTuple(collections.namedtuple(
 
 class InferOutputTuple(collections.namedtuple(
     "InferOutputTuple", ("infer_logits", "infer_summary", "sample_id",
-                         "sample_words"))):
+                         "sample_words", "src_seq_length"))):
   """To allow for flexibily in returing different outputs."""
   pass
 
@@ -630,7 +630,8 @@ class BaseModel(object):
     output_tuple = InferOutputTuple(infer_logits=self.infer_logits,
                                     infer_summary=self.infer_summary,
                                     sample_id=self.sample_id,
-                                    sample_words=self.sample_words)
+                                    sample_words=self.sample_words,
+                                    src_seq_length=self.iterator.source_sequence_length)
     return sess.run(output_tuple)
 
   def decode(self, sess):
@@ -644,9 +645,10 @@ class BaseModel(object):
         outputs: of size [batch_size, time]
     """
     output_tuple = self.infer(sess)
+    src_seq_length = output_tuple.src_seq_length
     sample_words = output_tuple.sample_words
     infer_summary = output_tuple.infer_summary
-
+    
     # make sure outputs is of shape [batch_size, time] or [beam_width,
     # batch_size, time] when using beam search.
     if self.time_major:
@@ -654,7 +656,7 @@ class BaseModel(object):
     elif sample_words.ndim == 3:
       # beam search output in [batch_size, time, beam_width] shape.
       sample_words = sample_words.transpose([2, 0, 1])
-    return sample_words, infer_summary
+    return sample_words, src_seq_length, infer_summary
 
   def build_encoder_states(self, include_embeddings=False):
     """Stack encoder states and return tensor [batch, length, layer, size]."""
