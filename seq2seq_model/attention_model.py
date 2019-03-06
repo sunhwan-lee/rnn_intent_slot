@@ -87,7 +87,7 @@ class AttentionModel(model.Model):
 
     num_units = hparams.num_units
     num_layers = self.num_decoder_layers
-    num_residual_layers = self.num_decoder_residual_layers
+    #num_residual_layers = self.num_decoder_residual_layers
     infer_mode = hparams.infer_mode
 
     dtype = tf.float32
@@ -115,7 +115,6 @@ class AttentionModel(model.Model):
         unit_type=hparams.unit_type,
         num_units=num_units,
         num_layers=num_layers,
-        num_residual_layers=num_residual_layers,
         forget_bias=hparams.forget_bias,
         dropout=hparams.dropout,
         num_gpus=self.num_gpus,
