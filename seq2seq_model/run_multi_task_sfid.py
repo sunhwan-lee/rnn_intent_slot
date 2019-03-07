@@ -434,29 +434,6 @@ def extend_hparams(hparams):
                         hparams.num_encoder_layers,
                         hparams.num_decoder_layers))
 
-  # Set residual layers
-  num_encoder_residual_layers = 0
-  num_decoder_residual_layers = 0
-  if hparams.residual:
-    if hparams.num_encoder_layers > 1:
-      num_encoder_residual_layers = hparams.num_encoder_layers - 1
-    if hparams.num_decoder_layers > 1:
-      num_decoder_residual_layers = hparams.num_decoder_layers - 1
-
-    if hparams.encoder_type == "gnmt":
-      # The first unidirectional layer (after the bi-directional layer) in
-      # the GNMT encoder can't have residual connection due to the input is
-      # the concatenation of fw_cell and bw_cell's outputs.
-      num_encoder_residual_layers = hparams.num_encoder_layers - 2
-
-      # Compatible for GNMT models
-      if hparams.num_encoder_layers == hparams.num_decoder_layers:
-        num_decoder_residual_layers = num_encoder_residual_layers
-  _add_argument(hparams, "num_encoder_residual_layers",
-                num_encoder_residual_layers)
-  _add_argument(hparams, "num_decoder_residual_layers",
-                num_decoder_residual_layers)
-
   # Language modeling
   if getattr(hparams, "language_model", None):
     hparams.attention = ""
