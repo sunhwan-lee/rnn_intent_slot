@@ -1,77 +1,174 @@
+
+import numpy as np
+
 import tensorflow as tf
+from tensorflow.contrib.rnn import static_bidirectional_rnn
+from tensorflow.contrib.rnn import BasicLSTMCell
 
-import multi_task_model
+n_steps = 2
+n_inputs = 3
+n_neurons = 5
+
+X = tf.placeholder(dtype=tf.float32, shape=[None, n_steps, n_inputs])
+seq_length = tf.placeholder(tf.int32, [None])
+
+#basic_cell = tf.nn.rnn_cell.BasicRNNCell(num_units=n_neurons)
+#outputs, states = tf.nn.dynamic_rnn(basic_cell, X, sequence_length=seq_length, dtype=tf.float32)
+
+x = tf.unstack(X, n_steps, 1)
+
+cell_fw = tf.nn.rnn_cell.BasicLSTMCell(num_units=n_neurons)
+cell_bw = tf.nn.rnn_cell.BasicLSTMCell(num_units=n_neurons)
+
+rnn_outputs = static_bidirectional_rnn(cell_fw,
+                                       cell_bw, 
+                                       x, 
+                                       sequence_length=seq_length,
+                                       dtype=tf.float32)
+encoder_outputs, encoder_state_fw, encoder_state_bw = rnn_outputs
+
+X_batch = np.array([
+  # t = 0      t = 1
+  [[0, 1, 2], [9, 8, 7]], # instance 0
+  [[3, 4, 5], [0, 0, 0]], # instance 1
+  [[6, 7, 8], [6, 5, 4]], # instance 2
+  [[9, 0, 1], [3, 2, 1]], # instance 3
+])
+print(X_batch)
+print(X_batch.shape)
+seq_length_batch = np.array([2, 1, 2, 2])
+
+with tf.Session() as sess:
+  sess.run(tf.global_variables_initializer())
+  encoder_outputs_val, encoder_state_fw_val, encoder_state_bw_val = \
+    sess.run([encoder_outputs, encoder_state_fw, encoder_state_bw], 
+             feed_dict={X: X_batch, seq_length: seq_length_batch})
+
+  print(encoder_outputs_val)
+  print()
+  print(encoder_state_fw_val)
+  print(encoder_state_fw_val[-1])
+  print()
+  print(encoder_state_bw_val)
+  print(encoder_state_bw_val[-1])
+
+"""
+from __future__ import print_function
+
+import tensorflow as tf
+from tensorflow.contrib import rnn
+import numpy as np
+
+# Import MNIST data
+from tensorflow.examples.tutorials.mnist import input_data
+mnist = input_data.read_data_sets("/tmp/data/", one_hot=True)
+
+'''
+To classify images using a bidirectional recurrent neural network, we consider
+every image row as a sequence of pixels. Because MNIST image shape is 28*28px,
+we will then handle 28 sequences of 28 steps for every sample.
+'''
+
+# Training Parameters
+learning_rate = 0.001
+training_steps = 10000
+batch_size = 128
+display_step = 200
+
+# Network Parameters
+num_input = 28 # MNIST data input (img shape: 28*28)
+timesteps = 28 # timesteps
+num_hidden = 128 # hidden layer num of features
+num_classes = 10 # MNIST total classes (0-9 digits)
+
+# tf Graph input
+X = tf.placeholder("float", [None, timesteps, num_input])
+Y = tf.placeholder("float", [None, num_classes])
+
+# Define weights
+weights = {
+    # Hidden layer weights => 2*n_hidden because of forward + backward cells
+    'out': tf.Variable(tf.random_normal([2*num_hidden, num_classes]))
+}
+biases = {
+    'out': tf.Variable(tf.random_normal([num_classes]))
+}
 
 
-tf.app.flags.DEFINE_float("max_gradient_norm", 5.0,
-                          "Clip gradients to this norm.")
-tf.app.flags.DEFINE_integer("batch_size", 16,
-                            "Batch size to use during training.")
-tf.app.flags.DEFINE_integer("size", 128, "Size of each model layer.")
-tf.app.flags.DEFINE_integer("word_embedding_size", 128, "word embedding size")
-tf.app.flags.DEFINE_integer("num_layers", 1, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("in_vocab_size", 10000, "max vocab Size.")
-tf.app.flags.DEFINE_integer("out_vocab_size", 10000, "max tag vocab Size.")
-tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
-tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
-tf.app.flags.DEFINE_integer("max_train_data_size", 0,
-                            "Limit on the size of training data (0: no limit)")
-tf.app.flags.DEFINE_integer("steps_per_checkpoint", 100,
-                            "How many training steps to do per checkpoint.")
-tf.app.flags.DEFINE_integer("max_training_steps", 30000,
-                            "Max training steps.")
-tf.app.flags.DEFINE_integer("max_test_data_size", 0,
-                            "Max size of test set.")
-tf.app.flags.DEFINE_boolean("use_attention", True,
-                            "Use attention based RNN")
-tf.app.flags.DEFINE_integer("max_sequence_length", 50,
-                            "Max sequence length.")
-tf.app.flags.DEFINE_float("dropout_keep_prob", 0.5,
-                          "dropout keep cell input and output prob.")  
-tf.app.flags.DEFINE_boolean("bidirectional_rnn", True,
-                            "Use birectional RNN")
-tf.app.flags.DEFINE_string("task", "joint", "Options: joint; intent; tagging")
-FLAGS = tf.app.flags.FLAGS
-    
-if FLAGS.max_sequence_length == 0:
-    print ('Please indicate max sequence length. Exit')
-    exit()
+def BiRNN(x, weights, biases):
 
-if FLAGS.task is None:
-    print ('Please indicate task to run.' + 
-           'Available options: intent; tagging; joint')
-    exit()
+    # Prepare data shape to match `rnn` function requirements
+    # Current data input shape: (batch_size, timesteps, n_input)
+    # Required shape: 'timesteps' tensors list of shape (batch_size, num_input)
 
-task = dict({'intent':0, 'tagging':0, 'joint':0})
-if FLAGS.task == 'intent':
-    task['intent'] = 1
-elif FLAGS.task == 'tagging':
-    task['tagging'] = 1
-elif FLAGS.task == 'joint':
-    task['intent'] = 1
-    task['tagging'] = 1
-    task['joint'] = 1
-    
-_buckets = [(FLAGS.max_sequence_length, FLAGS.max_sequence_length)]
+    # Unstack to get a list of 'timesteps' tensors of shape (batch_size, num_input)
+    x = tf.unstack(x, timesteps, 1)
+    print(x[0].get_shape())
 
-source_vocab_size = 10000 
-target_vocab_size = 10000 
-label_vocab_size = 3
+    # Define lstm cells with tensorflow
+    # Forward direction cell
+    lstm_fw_cell = rnn.BasicLSTMCell(num_hidden, forget_bias=1.0)
+    # Backward direction cell
+    lstm_bw_cell = rnn.BasicLSTMCell(num_hidden, forget_bias=1.0)
 
-with tf.variable_scope("model", reuse=None):
-    model_train = multi_task_model.MultiTaskModel(
-          source_vocab_size, 
-          target_vocab_size, 
-          label_vocab_size, 
-          _buckets,
-          FLAGS.word_embedding_size, 
-          FLAGS.size, 
-          FLAGS.num_layers, 
-          FLAGS.max_gradient_norm, 
-          FLAGS.batch_size,
-          dropout_keep_prob=FLAGS.dropout_keep_prob, 
-          use_lstm=True,
-          forward_only=False, 
-          use_attention=FLAGS.use_attention,
-          bidirectional_rnn=FLAGS.bidirectional_rnn,
-          task=task)
+    # Get lstm cell output
+    try:
+        outputs, _, _ = rnn.static_bidirectional_rnn(lstm_fw_cell, lstm_bw_cell, x,
+                                              dtype=tf.float32)
+    except Exception: # Old TensorFlow version only returns outputs not states
+        outputs = rnn.static_bidirectional_rnn(lstm_fw_cell, lstm_bw_cell, x,
+                                        dtype=tf.float32)
+
+    # Linear activation, using rnn inner loop last output
+    return tf.matmul(outputs[-1], weights['out']) + biases['out']
+
+logits = BiRNN(X, weights, biases)
+prediction = tf.nn.softmax(logits)
+
+# Define loss and optimizer
+loss_op = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+    logits=logits, labels=Y))
+optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+train_op = optimizer.minimize(loss_op)
+
+# Evaluate model (with test logits, for dropout to be disabled)
+correct_pred = tf.equal(tf.argmax(prediction, 1), tf.argmax(Y, 1))
+accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+
+# Initialize the variables (i.e. assign their default value)
+init = tf.global_variables_initializer()
+
+# Start training
+with tf.Session() as sess:
+
+    # Run the initializer
+    sess.run(init)
+
+    for step in range(1, training_steps+1):
+        batch_x, batch_y = mnist.train.next_batch(batch_size)
+        print(batch_x)
+        print(batch_x.shape)
+        # Reshape data to get 28 seq of 28 elements
+        batch_x = batch_x.reshape((batch_size, timesteps, num_input))
+        print(batch_x)
+        print(batch_x.shape)
+        assert 1==0
+        # Run optimization op (backprop)
+        sess.run(train_op, feed_dict={X: batch_x, Y: batch_y})
+        if step % display_step == 0 or step == 1:
+            # Calculate batch loss and accuracy
+            loss, acc = sess.run([loss_op, accuracy], feed_dict={X: batch_x,
+                                                                 Y: batch_y})
+            print("Step " + str(step) + ", Minibatch Loss= " + \
+                  "{:.4f}".format(loss) + ", Training Accuracy= " + \
+                  "{:.3f}".format(acc))
+
+    print("Optimization Finished!")
+
+    # Calculate accuracy for 128 mnist test images
+    test_len = 128
+    test_data = mnist.test.images[:test_len].reshape((-1, timesteps, num_input))
+    test_label = mnist.test.labels[:test_len]
+    print("Testing Accuracy:", \
+        sess.run(accuracy, feed_dict={X: test_data, Y: test_label}))
+"""
