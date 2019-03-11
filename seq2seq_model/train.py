@@ -30,14 +30,14 @@ __all__ = [
 
 
 def run_sample_decode(infer_model, infer_sess, model_dir, hparams,
-                      summary_writer, src_data, tgt_data):
+                      summary_writer, src_data, tgt_data, lbl_data):
   """Sample decode a random sentence from src_data."""
   with infer_model.graph.as_default():
     loaded_infer_model, global_step = model_helper.create_or_load_model(
         infer_model.model, model_dir, infer_sess, "infer")
 
   _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
-                 infer_model.iterator, src_data, tgt_data,
+                 infer_model.iterator, src_data, tgt_data, lbl_data,
                  infer_model.src_placeholder,
                  infer_model.batch_size_placeholder, summary_writer)
 
@@ -82,9 +82,9 @@ def run_external_eval(infer_model,
   with infer_model.graph.as_default():
     loaded_infer_model, global_step = model_helper.create_or_load_model(
         infer_model.model, model_dir, infer_sess, "infer")
-
   dev_src_file = "%s.%s" % (hparams.dev_prefix, hparams.src)
   dev_tgt_file = "%s.%s" % (hparams.dev_prefix, hparams.tgt)
+  dev_lbl_file = "%s.%s" % (hparams.dev_prefix, hparams.lbl)
   dev_infer_iterator_feed_dict[
       infer_model.src_placeholder] = inference.load_data(dev_src_file)
   dev_infer_iterator_feed_dict[
@@ -97,6 +97,7 @@ def run_external_eval(infer_model,
       infer_model.iterator,
       dev_infer_iterator_feed_dict,
       dev_tgt_file,
+      dev_lbl_file,
       "dev",
       summary_writer,
       save_on_best=save_best_dev)
@@ -105,6 +106,7 @@ def run_external_eval(infer_model,
   if use_test_set and hparams.test_prefix:
     test_src_file = "%s.%s" % (hparams.test_prefix, hparams.src)
     test_tgt_file = "%s.%s" % (hparams.test_prefix, hparams.tgt)
+    test_lbl_file = "%s.%s" % (hparams.test_prefix, hparams.lbl)
     test_infer_iterator_feed_dict[
         infer_model.src_placeholder] = inference.load_data(test_src_file)
     test_infer_iterator_feed_dict[
@@ -117,6 +119,7 @@ def run_external_eval(infer_model,
         infer_model.iterator,
         test_infer_iterator_feed_dict,
         test_tgt_file,
+        test_lbl_file,
         "test",
         summary_writer,
         save_on_best=False)
@@ -131,7 +134,7 @@ def run_full_eval(model_dir,
                   summary_writer,
                   sample_src_data,
                   sample_tgt_data,
-                  avg_ckpts=False):
+                  sample_lbl_data):
   """Wrapper for running sample_decode, internal_eval and external_eval.
 
   Args:
@@ -144,13 +147,13 @@ def run_full_eval(model_dir,
     summary_writer: Summary writer for logging metrics to TensorBoard.
     sample_src_data: sample of source data for sample decoding.
     sample_tgt_data: sample of target data for sample decoding.
-    avg_ckpts: Whether to compute average external evaluation scores.
+    sample_tgt_data: sample of label (intent) data for sample decoding.
   Returns:
     Triple containing results summary, global step Tensorflow Variable and
     metrics in this order.
   """
   run_sample_decode(infer_model, infer_sess, model_dir, hparams, summary_writer,
-                    sample_src_data, sample_tgt_data)
+                    sample_src_data, sample_tgt_data, sample_lbl_data)
   
   dev_scores, test_scores, global_step = run_external_eval(
       infer_model,
@@ -173,7 +176,7 @@ def run_full_eval(model_dir,
 
 def init_stats():
   """Initialize statistics that we want to accumulate."""
-  return {"step_time": 0.0, "train_loss": 0.0,
+  return {"step_time": 0.0, "slot_train_loss": 0.0, "intent_train_loss": 0.0,
           "predict_count": 0.0,  # word count on the target side
           "word_count": 0.0,  # word counts for both source and target
           "sequence_count": 0.0,  # number of training examples processed
@@ -186,7 +189,8 @@ def update_stats(stats, start_time, step_result):
   # Update statistics
   batch_size = output_tuple.batch_size
   stats["step_time"] += time.time() - start_time
-  stats["train_loss"] += output_tuple.train_loss * batch_size
+  stats["slot_train_loss"] += output_tuple.train_loss[0] * batch_size
+  stats["intent_train_loss"] += output_tuple.train_loss[1] * batch_size
   stats["grad_norm"] += output_tuple.grad_norm
   stats["predict_count"] += output_tuple.predict_count
   stats["word_count"] += output_tuple.word_count
@@ -224,7 +228,7 @@ def process_stats(stats, info, global_step, steps_per_stats, log_f):
 
   # Per-predict info
   info["train_ppl"] = (
-      utils.safe_exp(stats["train_loss"] / stats["predict_count"]))
+      utils.safe_exp(stats["slot_train_loss"] / stats["predict_count"]))
 
   # Check for overflow
   is_overflow = False
@@ -293,8 +297,10 @@ def train(hparams, scope=None, target_session=""):
   # Preload data for sample decoding.
   dev_src_file = "%s.%s" % (hparams.dev_prefix, hparams.src)
   dev_tgt_file = "%s.%s" % (hparams.dev_prefix, hparams.tgt)
+  dev_lbl_file = "%s.%s" % (hparams.dev_prefix, hparams.lbl)
   sample_src_data = inference.load_data(dev_src_file)
   sample_tgt_data = inference.load_data(dev_tgt_file)
+  sample_lbl_data = inference.load_data(dev_lbl_file)
 
   summary_name = "train_log"
   model_dir = hparams.out_dir
@@ -327,8 +333,8 @@ def train(hparams, scope=None, target_session=""):
       model_dir, infer_model, infer_sess,
       eval_model, eval_sess, hparams,
       summary_writer, sample_src_data,
-      sample_tgt_data)
-
+      sample_tgt_data, sample_lbl_data)
+  
   last_stats_step = global_step
   last_eval_step = global_step
   last_external_eval_step = global_step
@@ -389,7 +395,7 @@ def train(hparams, scope=None, target_session=""):
       # Evaluate on dev/test
       run_sample_decode(infer_model, infer_sess,
                         model_dir, hparams, summary_writer, sample_src_data,
-                        sample_tgt_data)
+                        sample_tgt_data, sample_lbl_data)
       run_external_eval(
           infer_model, infer_sess, model_dir,
           hparams, summary_writer)
@@ -403,7 +409,7 @@ def train(hparams, scope=None, target_session=""):
   (result_summary, _, final_eval_metrics) = (
       run_full_eval(
           model_dir, infer_model, infer_sess, eval_model, eval_sess, hparams,
-          summary_writer, sample_src_data, sample_tgt_data))
+          summary_writer, sample_src_data, sample_tgt_data, sample_lbl_data))
   print_step_info("# Final, ", global_step, info, result_summary, log_f)
   utils.print_time("# Done training!", start_train_time)
 
@@ -416,7 +422,7 @@ def train(hparams, scope=None, target_session=""):
         os.path.join(best_model_dir, summary_name), infer_model.graph)
     result_summary, best_global_step, _ = run_full_eval(
         best_model_dir, infer_model, infer_sess, eval_model, eval_sess, hparams,
-        summary_writer, sample_src_data, sample_tgt_data)
+        summary_writer, sample_src_data, sample_tgt_data, sample_lbl_data)
     print_step_info("# Best %s, " % metric, best_global_step, info,
                     result_summary, log_f)
     summary_writer.close()
@@ -456,7 +462,7 @@ def _internal_eval(model, global_step, sess, iterator, iterator_feed_dict,
 
 
 def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
-                   tgt_data, iterator_src_placeholder,
+                   tgt_data, lbl_data, iterator_src_placeholder,
                    iterator_batch_size_placeholder, summary_writer):
   """Pick a sentence and decode."""
   decode_id = random.randint(0, len(src_data) - 1)
@@ -468,21 +474,23 @@ def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
   }
   sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
 
-  nmt_outputs, src_seq_length, attention_summary = model.decode(sess)
+  outputs, intent_pred, src_seq_length, attention_summary = model.decode(sess)
   
   if hparams.infer_mode == "beam_search":
     # get the top translation.
-    nmt_outputs = nmt_outputs[0]
+    outputs = outputs[0]
 
   translation = nmt_utils.get_translation(
-      nmt_outputs,
+      outputs,
       src_seq_length,
       sent_id=0,
       tgt_eos=hparams.eos,
       subword_option=hparams.subword_option)
-  utils.print_out("    src: %s" % src_data[decode_id])
-  utils.print_out("    ref: %s" % tgt_data[decode_id])
-  utils.print_out(b"    seq2seq: %s\n" % translation)
+  utils.print_out("             intent: %s" % lbl_data[decode_id])
+  utils.print_out("                src: %s" % src_data[decode_id])
+  utils.print_out("                ref: %s" % tgt_data[decode_id])
+  utils.print_out(b"   seq2seq (intent): %s" % intent_pred[0])
+  utils.print_out(b"     seq2seq (slot): %s\n" % translation)
 
   # Summary
   if attention_summary is not None:
@@ -490,8 +498,8 @@ def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
 
 
 def _external_eval(model, global_step, sess, hparams, iterator,
-                   iterator_feed_dict, tgt_file, label, summary_writer,
-                   save_on_best):
+                   iterator_feed_dict, tgt_file, lbl_file, label, 
+                   summary_writer, save_on_best):
   """External evaluation such as BLEU and ROUGE scores."""
   out_dir = hparams.out_dir
   decode = global_step > 0
@@ -501,13 +509,16 @@ def _external_eval(model, global_step, sess, hparams, iterator,
 
   sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
 
-  output = os.path.join(out_dir, "output_%s" % label)
+  slot_output = os.path.join(out_dir, "slot_output_%s" % label)
+  intent_output = os.path.join(out_dir, "intent_output_%s" % label)
   scores = nmt_utils.decode_and_evaluate(
       label,
       model,
       sess,
-      output,
+      slot_output,
+      intent_output,
       ref_file=tgt_file,
+      ref_lbl_file=lbl_file,
       metrics=hparams.metrics,
       subword_option=hparams.subword_option,
       beam_width=hparams.beam_width,

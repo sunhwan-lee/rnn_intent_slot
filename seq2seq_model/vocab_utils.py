@@ -140,8 +140,10 @@ def check_vocab(vocab_file, out_dir, check_special_token=True, sos=None,
   return vocab_size, vocab_file
 
 
-def create_vocab_tables(src_vocab_file, tgt_vocab_file, share_vocab):
-  """Creates vocab tables for src_vocab_file and tgt_vocab_file."""
+def create_vocab_tables(src_vocab_file, tgt_vocab_file, lbl_vocab_file, 
+                        share_vocab):
+  """Creates vocab tables for src_vocab_file, tgt_vocab_file, 
+  and lbl_vocab_file."""
   src_vocab_table = lookup_ops.index_table_from_file(
       src_vocab_file, default_value=UNK_ID)
   if share_vocab:
@@ -149,7 +151,9 @@ def create_vocab_tables(src_vocab_file, tgt_vocab_file, share_vocab):
   else:
     tgt_vocab_table = lookup_ops.index_table_from_file(
         tgt_vocab_file, default_value=UNK_ID)
-  return src_vocab_table, tgt_vocab_table
+  lbl_vocab_table = lookup_ops.index_table_from_file(
+      lbl_vocab_file, default_value=UNK_ID)
+  return src_vocab_table, tgt_vocab_table, lbl_vocab_table
 
 
 def load_embed_txt(embed_file):

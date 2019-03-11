@@ -22,20 +22,25 @@ import evaluation_utils
 import vocab_utils
 
 """
-mkdir output/vanilla_seq2seq
+mkdir output/vanilla_seq2seq_joint
 python run_multi_task_sfid.py \
-    --src=seq.in --tgt=seq.out \
+    --num_units=128 \
+    --num_encoder_layers=2 \
+    --encoder_type=bi \
+    --num_decoder_layers=2 \
+    --src=seq.in \
+    --tgt=seq.out \
+    --lbl=label \
     --vocab_prefix=data/ATIS/processed/vocab  \
     --train_prefix=data/ATIS/processed/train \
     --dev_prefix=data/ATIS/processed/valid  \
     --test_prefix=data/ATIS/processed/test \
-    --out_dir=output/vanilla_seq2seq \
-    --num_train_steps=12000 \
+    --out_dir=output/vanilla_seq2seq_joint \
+    --num_train_steps=20000 \
     --steps_per_stats=100 \
-    --num_layers=2 \
-    --num_units=128 \
     --dropout=0.2 \
-    --metrics=f1 
+    --metrics=f1,accuracy \
+    --override_loaded_hparams=True
 """
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1' 
 
@@ -148,9 +153,11 @@ def add_arguments(parser):
 
   # data
   parser.add_argument("--src", type=str, default=None,
-                      help="Source suffix, e.g., en.")
+                      help="Source suffix")
   parser.add_argument("--tgt", type=str, default=None,
-                      help="Target suffix, e.g., de.")
+                      help="Target suffix")
+  parser.add_argument("--lbl", type=str, default=None,
+                      help="Label (intent) suffix")
   parser.add_argument("--train_prefix", type=str, default=None,
                       help="Train prefix, expect files with src/tgt suffixes.")
   parser.add_argument("--dev_prefix", type=str, default=None,
@@ -315,6 +322,7 @@ def create_hparams(flags):
       # Data
       src=flags.src,
       tgt=flags.tgt,
+      lbl=flags.lbl,
       train_prefix=flags.train_prefix,
       dev_prefix=flags.dev_prefix,
       test_prefix=flags.test_prefix,
@@ -434,21 +442,12 @@ def extend_hparams(hparams):
                         hparams.num_encoder_layers,
                         hparams.num_decoder_layers))
 
-  # Language modeling
-  if getattr(hparams, "language_model", None):
-    hparams.attention = ""
-    hparams.attention_architecture = ""
-    hparams.pass_hidden_state = False
-    hparams.share_vocab = True
-    hparams.src = hparams.tgt
-    utils.print_out("For language modeling, we turn off attention and "
-                    "pass_hidden_state; turn on share_vocab; set src to tgt.")
-
   ## Vocab
   # Get vocab file names first
   if hparams.vocab_prefix:
-    src_vocab_file = hparams.vocab_prefix + "." + hparams.src
-    tgt_vocab_file = hparams.vocab_prefix + "." + hparams.tgt
+    src_vocab_file   = hparams.vocab_prefix + "." + hparams.src
+    tgt_vocab_file   = hparams.vocab_prefix + "." + hparams.tgt
+    lbl_vocab_file = hparams.vocab_prefix + "." + hparams.lbl
   else:
     raise ValueError("hparams.vocab_prefix must be provided.")
 
@@ -475,10 +474,21 @@ def extend_hparams(hparams):
         sos=hparams.sos,
         eos=hparams.eos,
         unk=vocab_utils.UNK)
+
+  # Label vocab
+  lbl_vocab_size, lbl_vocab_file = vocab_utils.check_vocab(
+        lbl_vocab_file,
+        hparams.out_dir,
+        check_special_token=check_special_token,
+        sos=hparams.sos,
+        eos=hparams.eos,
+        unk=vocab_utils.UNK)
   _add_argument(hparams, "src_vocab_size", src_vocab_size)
   _add_argument(hparams, "tgt_vocab_size", tgt_vocab_size)
+  _add_argument(hparams, "lbl_vocab_size", lbl_vocab_size)
   _add_argument(hparams, "src_vocab_file", src_vocab_file)
   _add_argument(hparams, "tgt_vocab_file", tgt_vocab_file)
+  _add_argument(hparams, "lbl_vocab_file", lbl_vocab_file)
 
   # Pretrained Embeddings
   _add_argument(hparams, "src_embed_file", "")
@@ -621,7 +631,7 @@ def run_main(flags, default_hparams, train_fn, inference_fn, target_session=""):
     hparams = create_or_load_hparams(
         out_dir, default_hparams, flags.hparams_path,
         save_hparams=(jobid == 0))
-  
+
   ## Train / Decode
   if flags.inference_input_file:
     # Inference output directory
@@ -664,7 +674,7 @@ def main(unused_argv):
   run_main(FLAGS, default_hparams, train_fn, inference_fn)
 
 if __name__ == "__main__":
-  nmt_parser = argparse.ArgumentParser()
-  add_arguments(nmt_parser)
-  FLAGS, unparsed = nmt_parser.parse_known_args()
+  parser = argparse.ArgumentParser()
+  add_arguments(parser)
+  FLAGS, unparsed = parser.parse_known_args()
   tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)

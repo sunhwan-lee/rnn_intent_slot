@@ -45,45 +45,43 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
       if None, basic_tokenizer will be used.
     normalize_digits: Boolean; if true, all digits are replaced by 0s.
   """
-  if not gfile.Exists(vocabulary_path):
-    print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
-    vocab = {}
-    with gfile.GFile(data_path, mode="r") as f:
-      counter = 0
-      for line in f:
-        counter += 1
-        if counter % 100000 == 0:
-          print("  processing line %d" % counter)
-        tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
-        for w in tokens:
-          word = re.sub(_DIGIT_RE, "0", w) if normalize_digits else w
-          if word in vocab:
-            vocab[word] += 1
-          else:
-            vocab[word] = 1
-      vocab_list = config.START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
-      if len(vocab_list) > max_vocabulary_size:
-        vocab_list = vocab_list[:max_vocabulary_size]
-      with gfile.GFile(vocabulary_path, mode="w") as vocab_file:
-        for w in vocab_list:
-          vocab_file.write(w + "\n")
+  print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
+  vocab = {}
+  with gfile.GFile(data_path, mode="r") as f:
+    counter = 0
+    for line in f:
+      counter += 1
+      if counter % 100000 == 0:
+        print("  processing line %d" % counter)
+      tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
+      for w in tokens:
+        word = re.sub(_DIGIT_RE, "0", w) if normalize_digits else w
+        if word in vocab:
+          vocab[word] += 1
+        else:
+          vocab[word] = 1
+    vocab_list = config.START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
+    if len(vocab_list) > max_vocabulary_size:
+      vocab_list = vocab_list[:max_vocabulary_size]
+    with gfile.GFile(vocabulary_path, mode="w") as vocab_file:
+      for w in vocab_list:
+        vocab_file.write(w + "\n")
 
 def create_label_vocab(vocabulary_path, data_path):
-  if not gfile.Exists(vocabulary_path):
-    print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
-    vocab = {}
-    with gfile.GFile(data_path, mode="r") as f:
-      counter = 0
-      for line in f:
-        counter += 1
-        if counter % 100000 == 0:
-          print("  processing line %d" % counter)
-        label = line.strip()
-        vocab[label] = 1
-      label_list = config.START_VOCAB[:1] + sorted(vocab)
-      with gfile.GFile(vocabulary_path, mode="w") as vocab_file:
-        for k in label_list:
-          vocab_file.write(k + "\n")
+  print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
+  vocab = {}
+  with gfile.GFile(data_path, mode="r") as f:
+    counter = 0
+    for line in f:
+      counter += 1
+      if counter % 100000 == 0:
+        print("  processing line %d" % counter)
+      label = line.strip()
+      vocab[label] = 1
+    label_list = config.START_VOCAB + sorted(vocab)
+    with gfile.GFile(vocabulary_path, mode="w") as vocab_file:
+      for k in label_list:
+        vocab_file.write(k + "\n")
 
 def prepare_dataset(inputfile, mode):
 

@@ -39,7 +39,7 @@ class EvalOutputTuple(collections.namedtuple(
 
 class InferOutputTuple(collections.namedtuple(
     "InferOutputTuple", ("infer_logits", "infer_summary", "sample_id",
-                         "sample_words", "src_seq_length"))):
+                         "sample_words", "sample_intent", "src_seq_length"))):
   """To allow for flexibily in returing different outputs."""
   pass
 
@@ -54,7 +54,9 @@ class BaseModel(object):
                iterator,
                source_vocab_table,
                target_vocab_table,
+               label_vocab_table,
                reverse_target_vocab_table=None,
+               reverse_target_intent_vocab_table=None,
                scope=None,
                extra_args=None):
     """Create the model.
@@ -65,6 +67,7 @@ class BaseModel(object):
       iterator: Dataset Iterator that feeds data.
       source_vocab_table: Lookup table mapping source words to ids.
       target_vocab_table: Lookup table mapping target words to ids.
+      label_vocab_table: Lookup table mapping label word to id.
       reverse_target_vocab_table: Lookup table mapping ids to target words. Only
         required in INFER mode. Defaults to None.
       scope: scope of the model.
@@ -74,12 +77,13 @@ class BaseModel(object):
     # Set params
     self._set_params_initializer(hparams, mode, iterator,
                                  source_vocab_table, target_vocab_table,
-                                 scope, extra_args)
+                                 label_vocab_table, scope, extra_args)
 
     # Train graph
     res = self.build_graph(hparams, scope=scope)
-    self._set_train_or_infer(res, reverse_target_vocab_table, hparams)
-
+    self._set_train_or_infer(res, reverse_target_vocab_table, 
+                             reverse_target_intent_vocab_table, hparams)
+    
     # Saver
     self.saver = tf.train.Saver(
         tf.global_variables(), max_to_keep=hparams.num_keep_ckpts)
@@ -90,6 +94,7 @@ class BaseModel(object):
                               iterator,
                               source_vocab_table,
                               target_vocab_table,
+                              label_vocab_table,
                               scope,
                               extra_args=None):
     """Set various params for self and initialize."""
@@ -98,9 +103,11 @@ class BaseModel(object):
     self.mode = mode
     self.src_vocab_table = source_vocab_table
     self.tgt_vocab_table = target_vocab_table
+    self.lbl_vocab_table = label_vocab_table
 
     self.src_vocab_size = hparams.src_vocab_size
     self.tgt_vocab_size = hparams.tgt_vocab_size
+    self.lbl_vocab_size = hparams.lbl_vocab_size
     self.num_gpus = hparams.num_gpus
     self.time_major = hparams.time_major
 
@@ -137,7 +144,10 @@ class BaseModel(object):
     self.encoder_emb_lookup_fn = tf.nn.embedding_lookup
     self.init_embeddings(hparams, scope)
 
-  def _set_train_or_infer(self, res, reverse_target_vocab_table, hparams):
+  def _set_train_or_infer(self, res, 
+                          reverse_target_vocab_table,
+                          reverse_target_intent_vocab_table,
+                          hparams):
     """Set up training and inference."""
     if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
       self.train_loss = res[1]
@@ -147,9 +157,12 @@ class BaseModel(object):
     elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
       self.eval_loss = res[1]
     elif self.mode == tf.contrib.learn.ModeKeys.INFER:
-      self.infer_logits, _, self.final_context_state, self.sample_id = res
+      self.infer_logits, _, self.final_context_state, \
+        self.sample_id, self.label_pred = res
       self.sample_words = reverse_target_vocab_table.lookup(
           tf.to_int64(self.sample_id))
+      self.sample_intent = reverse_target_intent_vocab_table.lookup(
+          tf.to_int64(self.label_pred))
 
     if self.mode != tf.contrib.learn.ModeKeys.INFER:
       ## Count the number of predicted words for compute ppl.
@@ -286,7 +299,8 @@ class BaseModel(object):
     """Get train summary."""
     train_summary = tf.summary.merge(
         [tf.summary.scalar("lr", self.learning_rate),
-         tf.summary.scalar("train_loss", self.train_loss)] +
+         tf.summary.scalar("slot_filling_loss", self.train_loss[0]),
+         tf.summary.scalar("intent_loss", self.train_loss[1])] +
         self.grad_norm_summary)
     return train_summary
 
@@ -343,20 +357,42 @@ class BaseModel(object):
     with tf.variable_scope(scope or "dynamic_seq2seq", dtype=self.dtype):
       # Encoder
       self.encoder_outputs, encoder_state = self._build_encoder(hparams)
+      fw_state, bw_state = encoder_state
+      print('encoder_outputs: ', self.encoder_outputs.shape)
+      print('fw_state.h: ', fw_state.h.shape)
+      print('bw_state.h: ', bw_state.h.shape)
+
+      # Linear layer for classification of intent
+      encoder_last_state = tf.concat([fw_state.h, bw_state.h], axis=1)
+      print('encoder_last_state: ', encoder_last_state.shape)
+      print()
+
+      encoder_output_size = encoder_last_state.get_shape()[1].value
+      print('encoder_output_size: ', encoder_output_size)
+      w = tf.get_variable('w', [encoder_output_size, self.lbl_vocab_size], dtype=tf.float32)
+      w_t = tf.transpose(w)
+      v = tf.get_variable('v', [self.lbl_vocab_size], dtype=tf.float32)
+      
+      # apply the linear layer    
+      label_logits = tf.nn.xw_plus_b(encoder_last_state, w, v) 
+      label_pred = tf.argmax(label_logits, 1)
+      print('label_scores: ', label_logits.shape)
+      print()
 
       ## Decoder
-      logits, decoder_cell_outputs, sample_id, final_context_state = (
+      slot_logits, decoder_cell_outputs, sample_id, final_context_state = (
           self._build_decoder(self.encoder_outputs, encoder_state, hparams))
 
       ## Loss
       if self.mode != tf.contrib.learn.ModeKeys.INFER:
         with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
                                                    self.num_gpus)):
-          loss = self._compute_loss(logits, decoder_cell_outputs)
+          loss = self._compute_loss(label_logits, slot_logits, decoder_cell_outputs)
       else:
-        loss = tf.constant(0.0)
+        loss = [tf.constant(0.0), tf.constant(0.0)]
 
-      return logits, loss, final_context_state, sample_id
+      return [label_logits, slot_logits], loss, final_context_state, \
+             sample_id, label_pred
 
   @abc.abstractmethod
   def _build_encoder(self, hparams):
@@ -411,6 +447,7 @@ class BaseModel(object):
       A tuple of final logits and final decoder state:
         logits: size [time, batch_size, vocab_size] when time_major=True.
     """
+    utils.print_out("# Build a basic decoder")
     tgt_sos_id = tf.cast(self.tgt_vocab_table.lookup(tf.constant(hparams.sos)),
                          tf.int32)
     tgt_eos_id = tf.cast(self.tgt_vocab_table.lookup(tf.constant(hparams.eos)),
@@ -602,8 +639,9 @@ class BaseModel(object):
 
     return crossent
 
-  def _compute_loss(self, logits, decoder_cell_outputs):
+  def _compute_loss(self, label_logits, logits, decoder_cell_outputs):
     """Compute optimization loss."""
+    # Compute loss for slot filing
     target_output = self.iterator.target_output
     if self.time_major:
       target_output = tf.transpose(target_output)
@@ -617,9 +655,18 @@ class BaseModel(object):
     if self.time_major:
       target_weights = tf.transpose(target_weights)
 
-    loss = tf.reduce_sum(
+    slot_filling_loss = tf.reduce_sum(
         crossent * target_weights) / tf.to_float(self.batch_size)
-    return loss
+
+    # Compute loss for intent
+    target_label = self.iterator.target_label
+    
+    # The label distributions using softmax function
+    intent_loss = tf.losses.sparse_softmax_cross_entropy(
+          labels=target_label, logits=label_logits)
+    intent_loss /= tf.to_float(self.batch_size)
+
+    return slot_filling_loss, intent_loss
 
   def _get_infer_summary(self, hparams):
     del hparams
@@ -631,6 +678,7 @@ class BaseModel(object):
                                     infer_summary=self.infer_summary,
                                     sample_id=self.sample_id,
                                     sample_words=self.sample_words,
+                                    sample_intent=self.sample_intent,
                                     src_seq_length=self.iterator.source_sequence_length)
     return sess.run(output_tuple)
 
@@ -647,16 +695,18 @@ class BaseModel(object):
     output_tuple = self.infer(sess)
     src_seq_length = output_tuple.src_seq_length
     sample_words = output_tuple.sample_words
+    sample_intent = output_tuple.sample_intent
     infer_summary = output_tuple.infer_summary
     
     # make sure outputs is of shape [batch_size, time] or [beam_width,
     # batch_size, time] when using beam search.
     if self.time_major:
       sample_words = sample_words.transpose()
+      sample_intent = sample_intent.transpose()
     elif sample_words.ndim == 3:
       # beam search output in [batch_size, time, beam_width] shape.
       sample_words = sample_words.transpose([2, 0, 1])
-    return sample_words, src_seq_length, infer_summary
+    return sample_words, sample_intent, src_seq_length, infer_summary
 
   def build_encoder_states(self, include_embeddings=False):
     """Stack encoder states and return tensor [batch, length, layer, size]."""
