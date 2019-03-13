@@ -15,6 +15,7 @@ import tensorflow as tf
 import attention_model
 import inference
 import model as base_model
+import rnn_model
 import model_helper
 import utils
 import nmt_utils
@@ -270,7 +271,10 @@ def get_model_creator(hparams):
   if hparams.attention and hparams.attention_architecture == "standard":
     model_creator = attention_model.AttentionModel
   elif not hparams.attention:
-    model_creator = base_model.Model
+    if hparams.task == "joint":
+      model_creator = base_model.Model
+    elif hparams.task == "intent":
+      model_creator = rnn_model.Model
   else:
     raise ValueError("Unknown attention architecture %s" %
                      hparams.attention_architecture)
@@ -334,6 +338,7 @@ def train(hparams, scope=None, target_session=""):
       eval_model, eval_sess, hparams,
       summary_writer, sample_src_data,
       sample_tgt_data, sample_lbl_data)
+  assert 1==0
   
   last_stats_step = global_step
   last_eval_step = global_step
@@ -474,28 +479,33 @@ def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
   }
   sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
 
-  outputs, intent_pred, src_seq_length, attention_summary = model.decode(sess)
+  if hparams.task == "joint":
+    outputs, intent_pred, src_seq_length, attention_summary = model.decode(sess)
+  elif hparams.task == "intent":
+    intent_pred, attention_summary = model.decode(sess)
   
   if hparams.infer_mode == "beam_search":
     # get the top translation.
     outputs = outputs[0]
 
-  translation = nmt_utils.get_translation(
-      outputs,
-      src_seq_length,
-      sent_id=0,
-      tgt_eos=hparams.eos,
-      subword_option=hparams.subword_option)
-  utils.print_out("             intent: %s" % lbl_data[decode_id])
-  utils.print_out("                src: %s" % src_data[decode_id])
-  utils.print_out("                ref: %s" % tgt_data[decode_id])
-  utils.print_out(b"   seq2seq (intent): %s" % intent_pred[0])
-  utils.print_out(b"     seq2seq (slot): %s\n" % translation)
+  utils.print_out("          intent: %s" % lbl_data[decode_id])
+  utils.print_out("             src: %s" % src_data[decode_id])
+  if hparams.task == "joint":
+    translation = nmt_utils.get_translation(
+        outputs,
+        src_seq_length,
+        sent_id=0,
+        tgt_eos=hparams.eos,
+        subword_option=hparams.subword_option)  
+    utils.print_out("      slot (ref): %s" % tgt_data[decode_id])
+    utils.print_out(b"   intent (pred): %s" % intent_pred[0])
+    utils.print_out(b"     slot (pred): %s\n" % translation)
+  elif hparams.task == "intent":
+    utils.print_out(b"   intent (pred): %s" % intent_pred[0])
 
   # Summary
   if attention_summary is not None:
     summary_writer.add_summary(attention_summary, global_step)
-
 
 def _external_eval(model, global_step, sess, hparams, iterator,
                    iterator_feed_dict, tgt_file, lbl_file, label, 
@@ -523,6 +533,7 @@ def _external_eval(model, global_step, sess, hparams, iterator,
       subword_option=hparams.subword_option,
       beam_width=hparams.beam_width,
       tgt_eos=hparams.eos,
+      task=hparams.task,
       decode=decode,
       infer_mode=hparams.infer_mode)
   # Save on best metrics

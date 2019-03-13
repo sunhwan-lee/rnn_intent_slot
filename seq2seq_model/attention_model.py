@@ -41,7 +41,9 @@ class AttentionModel(model.Model):
                iterator,
                source_vocab_table,
                target_vocab_table,
+               label_vocab_table,
                reverse_target_vocab_table=None,
+               reverse_target_intent_vocab_table=None,
                scope=None,
                extra_args=None):
     self.has_attention = hparams.attention_architecture and hparams.attention
@@ -59,7 +61,9 @@ class AttentionModel(model.Model):
         iterator=iterator,
         source_vocab_table=source_vocab_table,
         target_vocab_table=target_vocab_table,
+        label_vocab_table=label_vocab_table,
         reverse_target_vocab_table=reverse_target_vocab_table,
+        reverse_target_intent_vocab_table=reverse_target_intent_vocab_table,
         scope=scope,
         extra_args=extra_args)
 

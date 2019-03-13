@@ -38,6 +38,7 @@ def decode_and_evaluate(name,
                         subword_option,
                         beam_width,
                         tgt_eos,
+                        task,
                         num_translations_per_input=1,
                         decode=True,
                         infer_mode="greedy"):
@@ -63,23 +64,30 @@ def decode_and_evaluate(name,
 
         while True:
           try:
-            nmt_outputs, intent_pred, src_seq_length, _ = model.decode(sess)
-            if infer_mode != "beam_search":
-              nmt_outputs = np.expand_dims(nmt_outputs, 0)
+            if task == "joint":
+              nmt_outputs, intent_pred, src_seq_length, _ = model.decode(sess)
+              if infer_mode != "beam_search":
+                nmt_outputs = np.expand_dims(nmt_outputs, 0)
 
-            batch_size = nmt_outputs.shape[1]
+              batch_size = nmt_outputs.shape[1]
+            elif task == "intent":
+              intent_pred, _ = model.decode(sess)
+              batch_size = len(intent_pred)
+
             num_sentences += batch_size
 
             for sent_id in range(batch_size):
-              trans_intent_f.write((intent_pred[sent_id] + b"\n").decode("utf-8"))
-              for beam_id in range(num_translations_per_input):
-                translation = get_translation(
-                    nmt_outputs[beam_id],
-                    src_seq_length,
-                    sent_id,
-                    tgt_eos=tgt_eos,
-                    subword_option=subword_option)
-                trans_f.write((translation + b"\n").decode("utf-8"))
+              if task == "intent":
+                trans_intent_f.write((intent_pred[sent_id] + b"\n").decode("utf-8"))
+              if task == "joint":
+                for beam_id in range(num_translations_per_input):
+                  translation = get_translation(
+                      nmt_outputs[beam_id],
+                      src_seq_length,
+                      sent_id,
+                      tgt_eos=tgt_eos,
+                      subword_option=subword_option)
+                  trans_f.write((translation + b"\n").decode("utf-8"))
 
           except tf.errors.OutOfRangeError:
             utils.print_time(
@@ -89,21 +97,31 @@ def decode_and_evaluate(name,
 
   # Evaluation
   evaluation_scores = {}
-  if ref_file and tf.gfile.Exists(slot_trans_file):
-    for metric in metrics:
-      if metric == "f1":
+  if task == "joint":
+    if ref_file and tf.gfile.Exists(slot_trans_file) and tf.gfile.Exists(intent_trans_file):
+      for metric in metrics:
+        if metric == "f1":
+          score = evaluation_utils.evaluate(
+              ref_file,
+              slot_trans_file,
+              metric,
+              subword_option=subword_option)
+          evaluation_scores[metric] = score
+          utils.print_out("  %s %s: %.1f" % (metric, name, score))
+        elif metric == "accuracy":
+          score = evaluation_utils.evaluate(
+              ref_lbl_file,
+              intent_trans_file,
+              metric)
+          evaluation_scores[metric] = score
+          utils.print_out("  %s %s: %.1f" % (metric, name, score))
+  elif task == "intent":
+    if ref_lbl_file and tf.gfile.Exists(intent_trans_file):
+      for metric in metrics:
         score = evaluation_utils.evaluate(
-            ref_file,
-            slot_trans_file,
-            metric,
-            subword_option=subword_option)
-        evaluation_scores[metric] = score
-        utils.print_out("  %s %s: %.1f" % (metric, name, score))
-      elif metric == "accuracy":
-        score = evaluation_utils.evaluate(
-            ref_lbl_file,
-            intent_trans_file,
-            metric)
+              ref_lbl_file,
+              intent_trans_file,
+              metric)
         evaluation_scores[metric] = score
         utils.print_out("  %s %s: %.1f" % (metric, name, score))
 

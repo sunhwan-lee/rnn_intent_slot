@@ -306,6 +306,8 @@ def add_arguments(parser):
       """))
 
   # Job info
+  parser.add_argument("--task", type=str, default="joint",
+                      help="joint | intent | tagging")
   parser.add_argument("--jobid", type=int, default=0,
                       help="Task id of the worker.")
   parser.add_argument("--num_workers", type=int, default=1,
@@ -348,6 +350,7 @@ def create_hparams(flags):
       pass_hidden_state=flags.pass_hidden_state,
 
       # Train
+      task=flags.task,
       optimizer=flags.optimizer,
       num_train_steps=flags.num_train_steps,
       batch_size=flags.batch_size,
@@ -445,8 +448,8 @@ def extend_hparams(hparams):
   ## Vocab
   # Get vocab file names first
   if hparams.vocab_prefix:
-    src_vocab_file   = hparams.vocab_prefix + "." + hparams.src
-    tgt_vocab_file   = hparams.vocab_prefix + "." + hparams.tgt
+    src_vocab_file = hparams.vocab_prefix + "." + hparams.src
+    tgt_vocab_file = hparams.vocab_prefix + "." + hparams.tgt
     lbl_vocab_file = hparams.vocab_prefix + "." + hparams.lbl
   else:
     raise ValueError("hparams.vocab_prefix must be provided.")
@@ -631,7 +634,7 @@ def run_main(flags, default_hparams, train_fn, inference_fn, target_session=""):
     hparams = create_or_load_hparams(
         out_dir, default_hparams, flags.hparams_path,
         save_hparams=(jobid == 0))
-
+  
   ## Train / Decode
   if flags.inference_input_file:
     # Inference output directory
