@@ -183,23 +183,25 @@ def init_stats():
           "sequence_count": 0.0,  # number of training examples processed
           "grad_norm": 0.0}
 
-def update_stats(stats, start_time, step_result):
+def update_stats(hparams, stats, start_time, step_result):
   """Update stats: write summary and accumulate statistics."""
   _, output_tuple = step_result
 
   # Update statistics
   batch_size = output_tuple.batch_size
   stats["step_time"] += time.time() - start_time
-  stats["slot_train_loss"] += output_tuple.train_loss[0] * batch_size
-  stats["intent_train_loss"] += output_tuple.train_loss[1] * batch_size
+  if hparams.task == "joint":
+    stats["slot_train_loss"] += output_tuple.train_loss[0] * batch_size
+    stats["intent_train_loss"] += output_tuple.train_loss[1] * batch_size
+    stats["word_count"] += output_tuple.word_count
+    stats["predict_count"] += output_tuple.predict_count
+  elif hparams.task == "intent":
+    stats["intent_train_loss"] += output_tuple.train_loss * batch_size
   stats["grad_norm"] += output_tuple.grad_norm
-  stats["predict_count"] += output_tuple.predict_count
-  stats["word_count"] += output_tuple.word_count
   stats["sequence_count"] += batch_size
 
   return (output_tuple.global_step, output_tuple.learning_rate,
           output_tuple.train_summary)
-
 
 def print_step_info(prefix, global_step, info, result_summary, log_f):
   """Print all info at the current global step."""
@@ -210,7 +212,6 @@ def print_step_info(prefix, global_step, info, result_summary, log_f):
        time.ctime()),
       log_f)
 
-
 def add_info_summaries(summary_writer, global_step, info):
   """Add stuffs in info to summaries."""
   excluded_list = ["learning_rate"]
@@ -218,8 +219,7 @@ def add_info_summaries(summary_writer, global_step, info):
     if key not in excluded_list:
       utils.add_summary(summary_writer, global_step, key, info[key])
 
-
-def process_stats(stats, info, global_step, steps_per_stats, log_f):
+def process_stats(hparams, stats, info, global_step, steps_per_stats, log_f):
   """Update info and check for overflow."""
   # Per-step info
   info["avg_step_time"] = stats["step_time"] / steps_per_stats
@@ -227,20 +227,20 @@ def process_stats(stats, info, global_step, steps_per_stats, log_f):
   info["avg_sequence_count"] = stats["sequence_count"] / steps_per_stats
   info["speed"] = stats["word_count"] / (1000 * stats["step_time"])
 
-  # Per-predict info
-  info["train_ppl"] = (
-      utils.safe_exp(stats["slot_train_loss"] / stats["predict_count"]))
-
   # Check for overflow
   is_overflow = False
-  train_ppl = info["train_ppl"]
-  if math.isnan(train_ppl) or math.isinf(train_ppl) or train_ppl > 1e20:
-    utils.print_out("  step %d overflow, stop early" % global_step,
-                    log_f)
-    is_overflow = True
+  if hparams.task == "joint":
+    # Per-predict info
+    info["train_ppl"] = (
+        utils.safe_exp(stats["slot_train_loss"] / stats["predict_count"]))
+  
+    train_ppl = info["train_ppl"]
+    if math.isnan(train_ppl) or math.isinf(train_ppl) or train_ppl > 1e20:
+      utils.print_out("  step %d overflow, stop early" % global_step,
+                      log_f)
+      is_overflow = True
 
   return is_overflow
-
 
 def before_train(loaded_train_model, train_model, train_sess, global_step,
                  hparams, log_f):
@@ -338,7 +338,6 @@ def train(hparams, scope=None, target_session=""):
       eval_model, eval_sess, hparams,
       summary_writer, sample_src_data,
       sample_tgt_data, sample_lbl_data)
-  assert 1==0
   
   last_stats_step = global_step
   last_eval_step = global_step
@@ -370,14 +369,14 @@ def train(hparams, scope=None, target_session=""):
 
     # Process step_result, accumulate stats, and write summary
     global_step, info["learning_rate"], step_summary = update_stats(
-        stats, start_time, step_result)
+        hparams, stats, start_time, step_result)
     summary_writer.add_summary(step_summary, global_step)
-
+    
     # Once in a while, we print statistics.
     if global_step - last_stats_step >= steps_per_stats:
       last_stats_step = global_step
       is_overflow = process_stats(
-          stats, info, global_step, steps_per_stats, log_f)
+          hparams, stats, info, global_step, steps_per_stats, log_f)
       print_step_info("  ", global_step, info, get_best_results(hparams),
                       log_f)
       if is_overflow:

@@ -116,7 +116,7 @@ def add_arguments(parser):
 
   # optimizer
   parser.add_argument("--optimizer", type=str, default="sgd", help="sgd | adam")
-  parser.add_argument("--learning_rate", type=float, default=1.0,
+  parser.add_argument("--learning_rate", type=float, default=0.1,
                       help="Learning rate. Adam: 0.001 | 0.0001")
   parser.add_argument("--warmup_steps", type=int, default=0,
                       help="How many steps we inverse-decay learning.")

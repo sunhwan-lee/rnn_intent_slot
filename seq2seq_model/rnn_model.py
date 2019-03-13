@@ -25,7 +25,7 @@ __all__ = ["BaseModel", "Model"]
 
 class TrainOutputTuple(collections.namedtuple(
     "TrainOutputTuple", ("train_summary", "train_loss",
-                         "global_step", "word_count", "batch_size", "grad_norm",
+                         "global_step", "batch_size", "grad_norm",
                          "learning_rate"))):
   """To allow for flexibily in returing different outputs."""
   pass
@@ -149,11 +149,7 @@ class BaseModel(object):
                           hparams):
     """Set up training and inference."""
     if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
-
       self.train_loss = res[1]
-      self.word_count = tf.reduce_sum(
-          self.iterator.source_sequence_length) + tf.reduce_sum(
-              self.iterator.target_sequence_length)
     elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
       self.eval_loss = res[1]      
     elif self.mode == tf.contrib.learn.ModeKeys.INFER:
@@ -301,7 +297,6 @@ class BaseModel(object):
     output_tuple = TrainOutputTuple(train_summary=self.train_summary,
                                     train_loss=self.train_loss,
                                     global_step=self.global_step,
-                                    word_count=self.word_count,
                                     batch_size=self.batch_size,
                                     grad_norm=self.grad_norm,
                                     learning_rate=self.learning_rate)
