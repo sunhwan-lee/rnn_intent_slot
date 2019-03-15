@@ -20,7 +20,8 @@ import time
 import tensorflow as tf
 
 import attention_model
-import model as nmt_model
+import model as base_model
+import rnn_model
 import model_helper
 import utils
 import nmt_utils
@@ -87,18 +88,17 @@ def load_data(inference_input_file, hparams=None):
 
 def get_model_creator(hparams):
   """Get the right model class depending on configuration."""
-  if (hparams.encoder_type == "gnmt" or
-      hparams.attention_architecture in ["gnmt", "gnmt_v2"]):
-    model_creator = gnmt_model.GNMTModel
-  elif hparams.attention_architecture == "standard":
+  if hparams.attention and hparams.attention_architecture == "standard":
     model_creator = attention_model.AttentionModel
   elif not hparams.attention:
-    model_creator = nmt_model.Model
+    if hparams.task == "joint":
+      model_creator = base_model.Model
+    elif hparams.task == "intent":
+      model_creator = rnn_model.Model
   else:
     raise ValueError("Unknown attention architecture %s" %
                      hparams.attention_architecture)
   return model_creator
-
 
 def start_sess_and_load_model(infer_model, ckpt_path):
   """Start session and load model."""
@@ -109,6 +109,47 @@ def start_sess_and_load_model(infer_model, ckpt_path):
         infer_model.model, ckpt_path, sess, "infer")
   return sess, loaded_infer_model
 
+def decode(ckpt_path, inference_input_file, inference_output_file, hparams):
+  
+  model_creator = get_model_creator(hparams)
+  infer_model = model_helper.create_infer_model(model_creator, hparams, None)
+  sess, loaded_infer_model = start_sess_and_load_model(infer_model, ckpt_path)
+
+  # Read data
+  infer_data = load_data(inference_input_file, hparams)
+  print("infer_data:", infer_data)
+
+  for i in range(len(infer_data)):
+
+    sess.run(
+          infer_model.iterator.initializer,
+          feed_dict={
+              infer_model.src_placeholder: [infer_data[i]],
+              infer_model.batch_size_placeholder: 1
+          })  
+
+    if hparams.task == "joint":
+      outputs, intent_pred, src_seq_length, attention_summary = \
+          loaded_infer_model.decode(sess)
+    elif hparams.task == "intent":
+      intent_pred, attention_summary = loaded_infer_model.decode(sess)
+
+    if hparams.infer_mode == "beam_search":
+      # get the top translation.
+      outputs = outputs[0]
+
+    utils.print_out("             src: %s" % infer_data[i])
+    if hparams.task == "joint":
+      translation = nmt_utils.get_translation(
+          outputs,
+          src_seq_length,
+          sent_id=0,
+          tgt_eos=hparams.eos,
+          subword_option=hparams.subword_option)  
+      utils.print_out(b"   intent (pred): %s" % intent_pred[0])
+      utils.print_out(b"     slot (pred): %s\n" % translation)
+    elif hparams.task == "intent":
+      utils.print_out(b"   intent (pred): %s\n" % intent_pred[0])
 
 def inference(ckpt_path,
               inference_input_file,
@@ -157,7 +198,8 @@ def single_worker_inference(sess,
 
   # Read data
   infer_data = load_data(inference_input_file, hparams)
-
+  print("infer_data:", infer_data)
+  
   with infer_model.graph.as_default():
     sess.run(
         infer_model.iterator.initializer,

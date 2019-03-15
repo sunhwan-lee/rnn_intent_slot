@@ -517,6 +517,20 @@ def load_model(model, ckpt_path, session, name):
       (name, ckpt_path, time.time() - start_time))
   return model
 
+def create_or_load_model(model, model_dir, session, name):
+  """Create model and initialize or load parameters in session."""
+  latest_ckpt = tf.train.latest_checkpoint(model_dir)
+  if latest_ckpt:
+    model = load_model(model, latest_ckpt, session, name)
+  else:
+    start_time = time.time()
+    session.run(tf.global_variables_initializer())
+    session.run(tf.tables_initializer())
+    utils.print_out("  created %s model with fresh parameters, time %.2fs" %
+                    (name, time.time() - start_time))
+
+  global_step = model.global_step.eval(session=session)
+  return model, global_step
 
 def avg_checkpoints(model_dir, num_last_checkpoints, global_step,
                     global_step_name):
@@ -589,22 +603,6 @@ def avg_checkpoints(model_dir, num_last_checkpoints, global_step,
           os.path.join(avg_model_dir, "translate.ckpt"))
 
   return avg_model_dir
-
-
-def create_or_load_model(model, model_dir, session, name):
-  """Create model and initialize or load parameters in session."""
-  latest_ckpt = tf.train.latest_checkpoint(model_dir)
-  if latest_ckpt:
-    model = load_model(model, latest_ckpt, session, name)
-  else:
-    start_time = time.time()
-    session.run(tf.global_variables_initializer())
-    session.run(tf.tables_initializer())
-    utils.print_out("  created %s model with fresh parameters, time %.2fs" %
-                    (name, time.time() - start_time))
-
-  global_step = model.global_step.eval(session=session)
-  return model, global_step
 
 
 def compute_perplexity(model, sess, name):
