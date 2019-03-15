@@ -1,6 +1,8 @@
 # parameters for processing the dataset
-DATA_PATH = 'data/ATIS'
-PROCESSED_DATA_PATH = 'data/ATIS/processed'
+DATA_PATH = '../../data'
+PROCESSED_DATA_PATH = 'data/WTA/processed'
+#DATA_PATH = 'data/ATIS'
+#PROCESSED_DATA_PATH = 'data/ATIS/processed'
 VOCAB_SIZE = 10000
 
 # word level special token

@@ -143,9 +143,12 @@ def prepare_dataset(inputfile, mode):
 
 def prepare_raw_data():
   print('Preparing raw data into train / test / validation set ...')
-  raw_train_data = os.path.join(config.DATA_PATH, 'atis.train.w-intent.iob')
-  raw_test_data  = os.path.join(config.DATA_PATH, 'atis.test.w-intent.iob')
-  raw_valid_data = os.path.join(config.DATA_PATH, 'atis-2.dev.w-intent.iob')
+  raw_train_data = os.path.join(config.DATA_PATH, 'wta.train.intent')
+  raw_test_data  = os.path.join(config.DATA_PATH, 'wta.test.intent')
+  raw_valid_data = os.path.join(config.DATA_PATH, 'wta.valid.intent')
+  #raw_train_data = os.path.join(config.DATA_PATH, 'atis.train.intent.iob')
+  #raw_test_data  = os.path.join(config.DATA_PATH, 'atis.test.intent.iob')
+  #raw_valid_data = os.path.join(config.DATA_PATH, 'atis-2.dev.intent.iob')
   prepare_dataset(raw_train_data, 'train')
   prepare_dataset(raw_test_data, 'test')
   prepare_dataset(raw_valid_data, 'valid')
